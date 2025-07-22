@@ -60,13 +60,17 @@ trait RLAgent[S, A] {
 
   def chooseAction[F[_] : CpsFloatOrderedLogicMonad](env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A]
 
-  def step[F[_] : CpsFloatOrderedLogicMonad](env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[(RLAgent[S,A],Option[S])]
+  def step[F[_] : CpsFloatOrderedLogicMonad](env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): RLAgent.StepResult[F, S, A]
 
 }
 
 object RLAgent {
 
-  case class StepResult[S, A](agent: RLAgent[S, A], newState: Option[S])
+  type Choice[F[_],A] = F[A]
+
+  case class DirectStepResult[S, A](agent: RLAgent[S, A], newState: Option[S])
+
+  type StepResult[F[_], S, A] = F[DirectStepResult[S, A]]
 
 }
 
@@ -81,30 +85,24 @@ class RLModelAgent[M, S,A](model: RLModel[S,A, Float]) extends RLAgent[S,A] {
 
   def chooseAction[F[_]:CpsFloatOrderedLogicMonad](env: RLEnvironment[S,A], state: S, mode: AgentRunningMode): F[A] =
     reify[F] {
-
       val possibleActions = env.possibleActions[F](state)
       // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
       val actionSet = fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
-      val nextAction = model.selectOne(state, actionSet, mode)
-      ???
+      model.selectOne(state, actionSet, mode)
   }
 
-  def step[F[_]:CpsFloatOrderedLogicMonad](env: RLEnvironment[S,A], state: S, mode: AgentRunningMode): F[(RLAgent[S,A],Option[S])] = reify[F]{
+  def step[F[_]:CpsFloatOrderedLogicMonad](env: RLEnvironment[S,A], state: S, mode: AgentRunningMode): RLAgent.StepResult[F,S,A] = reify[F]{
     val a = chooseAction(env, state, mode).reflect
     env.applyAction(state, a) match
         case Some((newState, reward)) =>
             val nextModel = model.trainCase(state, newState, a, reward)
-            RLModelAgent(nextModel) -> newState
+            RLAgent.DirectStepResult(RLModelAgent(nextModel),Some(newState))
         case None =>
             val nextModel = model.trainCase(state, state, a, RLModel.BIG_NEGATIVE)
-            RLModelAgent(nextModel) -> state
+            RLAgent.DirectStepResult(RLModelAgent(nextModel),None)
   }
   
 }
 
-trait RLAgentMonad[F[_],S,A](using CpsFloatScoredLogicMonad[F])  {
 
-
-
-}
 

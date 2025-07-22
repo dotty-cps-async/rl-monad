@@ -3,7 +3,7 @@ package cps.learning
 
 trait TensorRepresentation[A] {
 
-  type Tensor
+  type Tensor 
   
   def buildTensor(a: A): Tensor
 
@@ -19,6 +19,14 @@ trait IntRepresentation[A] extends TensorRepresentation[A] {
   def buildTensor(a: A): Int
 
   def fromTensor(t: Int): Option[A]
+  
+  def toInt(a:A): Int = {
+    buildTensor(a)
+  }
+  
+  def fromInt(t: Int): Option[A] = {
+    fromTensor(t)
+  }
 
 }
 
