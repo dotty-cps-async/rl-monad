@@ -52,57 +52,5 @@ trait RLEnvironment[S, A] {
 
 
 
-enum AgentRunningMode {
-  case Explore, Exploit
-}
-
-trait RLAgent[S, A] {
-
-  def chooseAction[F[_] : CpsFloatOrderedLogicMonad](env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A]
-
-  def step[F[_] : CpsFloatOrderedLogicMonad](env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): RLAgent.StepResult[F, S, A]
-
-}
-
-object RLAgent {
-
-  type Choice[F[_],A] = F[A]
-
-  case class DirectStepResult[S, A](agent: RLAgent[S, A], newState: Option[S])
-
-  type StepResult[F[_], S, A] = F[DirectStepResult[S, A]]
-
-}
-
-
-class RLModelAgent[M, S,A](model: RLModel[S,A, Float]) extends RLAgent[S,A] {
-
-  def fromObserver[F[_],A](using m:CpsLogicMonad[F])(fa:m.Observer[A]):F[A] =
-    m.flattenObserver(
-      m.observerCpsMonad.map(fa)(a => m.pure(a))
-    )
-
-
-  def chooseAction[F[_]:CpsFloatOrderedLogicMonad](env: RLEnvironment[S,A], state: S, mode: AgentRunningMode): F[A] =
-    reify[F] {
-      val possibleActions = env.possibleActions[F](state)
-      // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
-      val actionSet = fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
-      model.selectOne(state, actionSet, mode)
-  }
-
-  def step[F[_]:CpsFloatOrderedLogicMonad](env: RLEnvironment[S,A], state: S, mode: AgentRunningMode): RLAgent.StepResult[F,S,A] = reify[F]{
-    val a = chooseAction(env, state, mode).reflect
-    env.applyAction(state, a) match
-        case Some((newState, reward)) =>
-            val nextModel = model.trainCase(state, newState, a, reward)
-            RLAgent.DirectStepResult(RLModelAgent(nextModel),Some(newState))
-        case None =>
-            val nextModel = model.trainCase(state, state, a, RLModel.BIG_NEGATIVE)
-            RLAgent.DirectStepResult(RLModelAgent(nextModel),None)
-  }
-  
-}
-
 
 

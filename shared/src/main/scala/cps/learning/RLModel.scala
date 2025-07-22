@@ -2,39 +2,30 @@ package cps.learning
 
 import cps.*
 
+
 /**
  * General interface for a Reinforcement Learning model, which exposes part of the functinality used by the Agent and Environment.
- *
  */
-trait RLModel[S,A,R]  {
-  
+trait RLModel[S, A, R] {
+
   def maxPossibleAction: Int
-  
+
   /**
    * Predict q-value for a given state and action.
    */
-  def predictQ(input: S, action:A): R
+  def predictQ(input: S, action: A): R
 
   /**
    * Select the best action for a given state
-   * 
+   *
    * @param input
    * @param actions
    * @param mode
    * @return
    */
-  def selectOne(input: S, actions: IndexedSeq[A], mode:AgentRunningMode): A
+  def selectOne(input: S, actions: IndexedSeq[A], mode: AgentRunningMode): A
 
-  /**
-   * Update the model with a new state, action and reward.
-   * Its automatically saved in the model and used for training when number of experiments to batch is reached.
-   * @param input
-   * @param target
-   * @param reward
-   */
-  def trainCase(state: S, nextState: S, target: A, reward: R): RLModel[S,A,R]
-  
-  
+
 }
 
 
@@ -51,5 +42,35 @@ object RLModel {
   val BIG_POSITIVE = 1000000.0f
 
 }
- 
 
+
+trait RLImmutableModel[S, A, R] extends RLModel[S, A, R] {
+
+  /**
+   * Update the model with a new state, action and reward.
+   * Its automatically saved in the model and used for training when number of experiments to batch is reached.
+   *
+   * @param input
+   * @param target
+   * @param reward
+   */
+  def trainCase(state: S, nextState: S, target: A, reward: R): RLImmutableModel[S, A, R]
+
+
+}
+
+
+trait RLMutableModel[S, A, R] extends RLModel[S, A, R]{
+  
+  /**
+   * Update the model with a new state, action and reward.
+   * Its automatically saved in the model and used for training when number of experiments to batch is reached.
+   *
+   * @param input
+   * @param target
+   * @param reward
+   */
+  def trainCase(state: S, nextState: S, target: A, reward: R): Unit
+
+
+}

@@ -24,9 +24,12 @@ class DJLRLModel[S: NDArrayRepresentation, A: IntRepresentation] private(
                                                                           targetNetworkTrainer: Trainer,
                                                                           random: Random = new Random(),
                                                                           epsilon: Float = 0.1f,
-                                                                        ) extends RLModel[S, A, Float] {
+                                                                          replayBuffer: ReplayBuffer[S,A] 
+                                                                        
+                                                                        ) extends RLImmutableModel[S, A, Float] {
 
-
+  
+  
   // we assume that qNetwork return q-values for all actions in one dimensions.
   override def maxPossibleAction: Int = {
     qNetwork.describeOutput().get(0).getValue.size().toInt
@@ -63,7 +66,7 @@ class DJLRLModel[S: NDArrayRepresentation, A: IntRepresentation] private(
     )
   }
 
-  override def trainCase(state: S, nextState: S, target: A, reward: Float): RLModel[S, A, Float] = {
+  override def trainCase(state: S, nextState: S, target: A, reward: Float): RLImmutableModel[S, A, Float] = {
     ???
 
   }
