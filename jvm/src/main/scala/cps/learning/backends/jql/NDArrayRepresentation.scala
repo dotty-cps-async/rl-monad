@@ -4,7 +4,7 @@ import ai.djl.ndarray.{NDArray, NDList}
 import ai.djl.translate.{Translator, TranslatorContext}
 import cps.learning.TensorRepresentation
 
-trait NDArrayRepresentation[A] extends TensorRepresentation[A] {
+trait NDArrayRepresentation[A] extends TensorRepresentation[A] with Translator[A, NDList] {
 
   type Tensor = NDArray
 
@@ -17,9 +17,8 @@ trait NDArrayRepresentation[A] extends TensorRepresentation[A] {
   override def processInput(ctx: TranslatorContext, input: A): NDList =
     new NDList(toNDArray(input))
 
-  override def processOutput(ctx: TranslatorContext, list: NDList): A = {  
-    val ndArray = list.singletonOrThrow()
-    fromNDArray(ndArray).getOrElse(throw new IllegalArgumentException("Invalid NDArray"))
+  override def processOutput(ctx: TranslatorContext, list: NDList): NDList = {  
+    list
   }
   
 }
