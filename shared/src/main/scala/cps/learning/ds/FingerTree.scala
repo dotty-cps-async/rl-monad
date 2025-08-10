@@ -111,11 +111,12 @@ sealed trait FingerTree[A, R] {
   }
 
   def dequeueMax(using rOrdering: Ordering[R]): (A, FingerTree[A, R]) = {
-    val acc = this.measure
 
-    def p(r: R): Boolean = rOrdering.gt(r, acc)
+    def p(r: R): Boolean = {
+      rOrdering.gteq(r,this.measure)
+    }
 
-    FingerTree.splitTree(p, acc, this)(using rMeasured, rMonoid) match {
+    FingerTree.splitTree(p, rMonoid.zero, this)(using rMeasured, rMonoid) match {
       case FingerTree.Split(left, pivot, right) =>
         (pivot, FingerTree.concat(left, right)(using rMeasured, rMonoid))
     }
@@ -146,8 +147,8 @@ object FingerTree {
       r.combine(acc, summon[Measured[A, R]].measure(a))
     }
   }
-  
-  def empty[A,R](using Monoid[R], Measured[A, R]): FingerTree[A, R] = {
+
+  def empty[A, R](using Monoid[R], Measured[A, R]): FingerTree[A, R] = {
     FingerTree.Empty()
   }
 
@@ -336,6 +337,13 @@ object FingerTree {
     }
 
   }
+  
+  extension [A](optD: Option[Digit[A]]) {
+    def toTree[R](using Measured[A, R], Monoid[R]): FingerTree[A, R] = optD match {
+      case None => FingerTree.Empty()
+      case Some(d) => d.toTree
+    }
+  }
 
   enum SeqView[A, R] {
     case Nil[A, R]() extends SeqView[A, R]
@@ -456,24 +464,39 @@ object FingerTree {
       case Digit.Two(a, b) =>
         val acc1 = acc |+| summon[Measured[A, R]].measure(a)
         if (p(acc1)) Split(None, a, Some(Digit.One(b)))
-        else Split(Some(Digit.One(a)), b, None)
+        else {
+          val lxrSplit = splitDigit(Digit.One(b), acc1, p)
+          lxrSplit.left match {
+            case None => Split(Some(Digit.One(a)), lxrSplit.pivot, lxrSplit.right)
+            case Some(d) =>
+              throw new IllegalArgumentException("Unexpected left digit in splitDigit(One) ")
+          }
+        }
       case Digit.Three(a, b, c) =>
         val acc1 = acc |+| summon[Measured[A, R]].measure(a)
         if (p(acc1)) then Split(None, a, Some(Digit.Two(b, c)))
         else
-          val acc2 = acc1 |+| summon[Measured[A, R]].measure(b)
-          if (p(acc2)) Split(Some(Digit.One(a)), b, Some(Digit.One(c)))
-          else Split(Some(Digit.Two(a, b)), c, None)
+          val lxrSplit = splitDigit(Digit.Two(b, c), acc1, p)
+          lxrSplit.left match
+            case None => Split(Some(Digit.One(a)), lxrSplit.pivot, lxrSplit.right)
+            case Some(Digit.One(la)) =>
+              Split(Some(Digit.Two(a, la)), lxrSplit.pivot, lxrSplit.right)
+            case Some(_) =>
+              throw new IllegalArgumentException("Unexpected left digit in splitDigit(Two) ")
       case Digit.Four(a, b, c, d) =>
         val acc1 = acc |+| summon[Measured[A, R]].measure(a)
         if (p(acc1)) Split(None, a, Some(Digit.Three(b, c, d)))
         else
-          val acc2 = acc1 |+| summon[Measured[A, R]].measure(b)
-          if (p(acc2)) Split(Some(Digit.One(a)), b, Some(Digit.Two(c, d)))
-          else
-            val acc3 = acc2 |+| summon[Measured[A, R]].measure(c)
-            if (p(acc3)) Split(Some(Digit.Two(a, b)), c, Some(Digit.One(d)))
-            else Split(Some(Digit.Three(a, b, c)), d, None)
+          val lxrSplit = splitDigit(Digit.Three(b, c, d), acc1, p)
+          lxrSplit.left match {
+            case None => Split(Some(Digit.One(a)), lxrSplit.pivot, lxrSplit.right)
+            case Some(Digit.One(x)) =>
+              Split(Some(Digit.Two(a, x)), lxrSplit.pivot, lxrSplit.right)
+            case Some(Digit.Two(x, y)) =>
+              Split(Some(Digit.Three(a, x, y)), lxrSplit.pivot, lxrSplit.right)
+            case Some(_) =>
+              throw new IllegalArgumentException("Unexpected left digit in splitDigit(Three) ")
+          }
     }
   }
 
@@ -485,11 +508,8 @@ object FingerTree {
       case FingerTree.Deep(prefix, middle, suffix, measure) =>
         val vpr = acc |+| prefix.measure
         if (p(vpr)) then
-          val prefixSplit = splitDigit(prefix, acc, p)
-          val newLeft = prefixSplit.left match
-            case None => FingerTree.Empty()
-            case Some(d) => d.toTree
-          Split(newLeft, prefixSplit.pivot, deepL(prefixSplit.right, middle, suffix))
+          val lxrSplit = splitDigit(prefix, acc, p)
+          Split(lxrSplit.left.toTree, lxrSplit.pivot, deepL(lxrSplit.right, middle, suffix))
         else
           val vm = vpr |+| middle.measure
           if p(vm) then
