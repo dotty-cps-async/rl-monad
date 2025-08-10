@@ -1,112 +1,134 @@
 package cps.learning.examples.shortestPath
 
-import cps.learning.CpsScoredLogicMonad
+import scala.util.*
+import cps.{learning, *}
+import cps.syntax.*
+import cps.learning.*
+import cps.monads.logic.*
 import cps.learning.examples.shortestPath.ShortestPath.SearchState
 
 case class Edge[N](from: N, to: N, cost: Float)
 
 trait GraphDB[N] {
-  
-  def neighbords(node: N): Seq[Edge]
-  
+
+  def neighbords(node: N): Seq[Edge[N]]
+
 }
 
 object ShortestPath {
 
-  type Reached[N] = Map[N,(IndexedSeq[N],Float)])
+  type Reached[N] = Map[N, (IndexedSeq[N], Float)]
 
   extension [N](m: Reached[N]) {
 
-    def addEdge(e: Edge): Map[N, IndexedSeq[N]] = {
-      marks.get(e.from) match
+    def addEdge(e: Edge[N]): (Reached[N], Float) = {
+      m.get(e.from) match
         case Some((path, prevCost)) =>
-          val (newPath, newCost) = ((path +: e.to), prevCost + e.cost)
-          market.get(to) match
-            case Some((prevPath, prevCost)) if (newCost > prevCost) =>
-              (marks, prevCost)
-            case _ =>
-              (marks + (e.to -> (newPath, newCost)), newCost)
+          val (newPath, newCost) = ((path.appended(e.to)), prevCost + e.cost)
+          m.get(e.to) match
+            case Some((prevPath, prevCost)) if (newCost > prevCost) => (m, prevCost)
+            case _ => (m + (e.to -> (newPath, newCost)), newCost)
         case None =>
-          throw new IllegalStateException(s"Incorrect state for adding edge ${from}->${to}")
+          throw new IllegalStateException(s"Incorrect state for adding edge ${e.from}->${e.to}, from is not in the reached map")
     }
 
-    def distance(n:Node) = m.get(node) match
+    def distance(node: N) = m.get(node) match
       case Some((_, cost)) => cost
       case None => Float.MaxValue
 
   }
-  
-  case class SearchState(marks: Map[N,(IndexedSeq[N], Float)], visited: Set[N])
 
-  def shortestPath0[F[_] : CpsScoredLogicMonad, N](db: GraphDB, start: N, end: N): F[()] = {
+  case class SearchState[N](marks: Map[N, (IndexedSeq[N], Float)], visited: Set[N])
 
+  def shortestPath0[F[_] : CpsScoredLogicMonad.Curry[Float], N](db: GraphDB[N], start: N, end: N): F[Option[IndexedSeq[N]]] = {
 
-    def pathFrom(state: SearchState, current: N, currentCost:Float): F[State] = {
+    //Wait for
+    val F = summon[CpsScoredLogicMonad[F, Float]]
+
+    def pathFrom(state: SearchState[N], current: N, currentCost: Float): F[SearchState[N]] = {
       F.multiScore(
-        db.neighbords(current).map(e => (e->currentCost + e.cost)).toMap
-      ).foldLeftWhileM(state)(state => !state.marks.contains(end) ) {
-        case (state, edge@Edge(_.to, _)) =>
-            val marks = state.addEdge(e)
-            val nextState = SearchState(marks, state.visited + to)
-            if (state.visited.contains(to))
-              then F.pure(nextState)
-            else {
-              pathFrom(nextStat)
-            }
-      }
-
-
-      nextNodes.headOption match
-        case None =>
-          F.pure(state)
-        case Some(e@Edge(current, to, _)) =>
-          val marks = state.addEdge(e)
+        db.neighbords(current).map(e => (-(currentCost + e.cost) -> e)).toMap
+          .map { case (score, e) => (score, () => F.pure(e)) }
+      ).foldLeftWhileM(state)(state => !state.marks.contains(end)) {
+        case (state, edge@Edge(_, to, _)) =>
+          val (marks, toCost) = state.marks.addEdge(edge)
           val nextState = SearchState(marks, state.visited + to)
           if (state.visited.contains(to))
           then F.pure(nextState)
           else {
-            (pathFrom(nextState, db.neighbours(to) -> nextState.distance(to)),
-              |+|
-                pathFrom (nextState, nextNodes.tail) -> nextState.distance(current)
-            )
+            pathFrom(nextState, to, toCost)
           }
+      }
+
     }
 
-    val state0 = State(Map(start -> (IndexedSeq[Start], 0.0f)), Set(start))
-    pathFrom(state0, start, db.neighbours(start))
+    val state0 = SearchState(Map(start -> (IndexedSeq(start), 0.0f)), Set(start))
+    summon[CpsScoredLogicMonad[F, Float]].map(pathFrom(state0, start, 0.0f)) {
+      state =>
+        state.marks.get(end) match {
+          case Some((path, _)) => Some(path)
+          case None => None
+        }
+    }
   }
 
 
-  def shortestPath[F[_]:CpsOrderedLogicMonad, N](db: GraphDB, start: N, end: N): F[Option[(Seq[Node],Float)]] = {
+  def shortestPath[F[_] : CpsOrderedLogicMonad.Curry[Float], N](db: GraphDB[N], start: N, end: N): F[Option[(IndexedSeq[N], Float)]] = {
 
-    def pathFrom(state: Map[N,(Seq[N],Float)] , nexts:F[Edge]): F[State] = {
-      nexts.msplit.flatMap {
-        case Some((e, rest)) =>
-          if state.distance(e.from) + e.cost < state.distance(e.to) then
-            val nextState = state.addEdge(e)
-            if (e.to == end) then
-              F.pure(nextState)
-            else
-              val nextEdges = db.neighbours(e.to).map(e => (e, -(currentCost + e.cost))).toMap
-              pathFrom(state, F.multiScore(nextEdges) |+| rest)
+    val F = summon[CpsOrderedLogicMonad[F, Float]]
+
+    def fNeightbords(e: N): F[Edge[N]] = {
+      F.order(
+        F.fromCollection(db.neighbords(e))
+      )(edge => -edge.cost)
+    }
+
+    def pathFrom(state: SearchState[N], nexts: F[Edge[N]]): F[SearchState[N]] = reify[F] {
+      reflect(F.msplit(nexts)) match {
+        case Some((Success(e), rest)) =>
+          if state.visited.contains(e.to) then
+            state
           else
-           pathForm(state, rest)
-        case None => F.pure(state)
+            val (marks, newCost) = state.marks.addEdge(e)
+            if newCost < state.marks.distance(e.to) then
+              val nextState = SearchState(marks, state.visited + e.to)
+              if e.to == end then
+                nextState
+              else
+                val nextEdges = F.order(F.fromCollection(db.neighbords(e.to)))(e => -(newCost + e.cost))
+                reflect(pathFrom(state, nextEdges |+| rest))
+            else
+              reflect(pathFrom(state, rest))
+        case Some((Failure(e), rest)) =>
+          throw e
+        case None => state
       }
     }
 
-    val state0 = Map(start -> (IndexedSeq[Start], 0.0f))
-    pathFrom(state0, start, db.neighbours(start).map(e => (e, -e.cost)).toMap).map(_.get(end))
+    val state0 = SearchState(Map(start -> (IndexedSeq(start), 0.0f)), Set.empty)
+    F.map(pathFrom(state0, F.fromCollection(db.neighbords(start)))) { state =>
+      state.marks.get(end)
+    }
   }
 
-  (a -> scoreA) |+| (b -> scoreB)
 
-  scoredMplus(a,scoreA,b,scoreB)
+}
 
+extension [F[_] : CpsScoredLogicMonad.Curry[Float], X](fx: F[X]) {
 
-    val state0 = SearchState(Map(start -> (IndexedSeq[Start], 0.0f)), Set(start), start, false)
-    pathFrom(state0)
+  def foldLeftWhileM[S](s: S)(cond: S => Boolean)(f: (S, X) => F[S]): F[S] = {
+    if !cond(s) then summon[CpsScoredLogicMonad[F, Float]].pure(s)
+    else
+      summon[CpsScoredLogicMonad[F, Float]].msplit(fx).flatMap {
+        case Some((Success(x), rest)) =>
+          f(s, x).flatMap { newState =>
+            rest.foldLeftWhileM(newState)(cond)(f)
+          }
+        case Some((Failure(e), rest)) =>
+          summon[CpsScoredLogicMonad[F, Float]].error(e)
+        case None => 
+          summon[CpsScoredLogicMonad[F, Float]].pure(s)
+      }
   }
 
-  
 }

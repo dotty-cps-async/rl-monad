@@ -1,28 +1,32 @@
 package cps.learning.examples.tiktaktoe
 
-type Board = Map[(Int,Int), Int]
+import cps.learning.*
 
-given (using NDManager)TensorRepresentation[Board] with {
-  
+import ai.djl.ndarray.*
+
+given (using NDManager): TensorRepresentation[Board] with {
+
   type Tensor = NDArray
-  
-  def buildTensor(a: Board): NDArray = {
+
+  def toTensor(a: Board): NDArray = {
     val size = a.size
-    val tensor = summon[NDManager].create(size)
+    val arr = new Array[Float](size * size)
     for (i <- 0 until size) {
       for (j <- 0 until size) {
-        tensor.set(i, j, a.getOrElse((i, j), 0))
+        arr(i * size + j) = a.getOrElse((i, j), 0).toFloat
       }
     }
+    val tensor = summon[NDManager].create(arr)
     tensor
   }
-  
+
   def fromTensor(t: NDArray): Option[Board] = {
     val size = t.getShape.get(0).toInt
-    val board = Board.empty
+    val board = Board.empty(size)
+    val arr = t.toFloatArray
     for (i <- 0 until size) {
       for (j <- 0 until size) {
-        val value = t.get(i, j).toInt
+        val value = arr(i * size + j).toInt
         if (value != 0) {
           board.update(i, j, value)
         }

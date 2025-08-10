@@ -24,3 +24,9 @@ class ReplayBuffer[S:NDArrayRepresentation,A:NDArrayRepresentation](
   }
   
 }
+
+object ReplayBuffer {
+  
+  val DEFAULT_MAX_SIZE = 10000
+  
+}

@@ -8,20 +8,13 @@ import cps.*
  */
 trait RLModel[S, A, R] {
 
+  /**
+   * Get the maximum possible action value (i.e. size of the action space).
+   */
   def maxPossibleAction: Int
 
   /**
-   * Predict q-value for a given state and action.
-   */
-  def predictQ(input: S, action: A): R
-
-  /**
    * Select the best action for a given state
-   *
-   * @param input
-   * @param actions
-   * @param mode
-   * @return
    */
   def selectOne(input: S, actions: IndexedSeq[A], mode: AgentRunningMode): A
 
@@ -48,29 +41,19 @@ trait RLImmutableModel[S, A, R] extends RLModel[S, A, R] {
 
   /**
    * Update the model with a new state, action and reward.
-   * Its automatically saved in the model and used for training when number of experiments to batch is reached.
-   *
-   * @param input
-   * @param target
-   * @param reward
    */
-  def trainCase(state: S, nextState: S, target: A, reward: R): RLImmutableModel[S, A, R]
+  def trainCase(state: S, nextState: S, action: A, reward: R, finsih: Boolean): RLImmutableModel[S, A, R]
 
 
 }
 
 
-trait RLMutableModel[S, A, R] extends RLModel[S, A, R]{
-  
+trait RLMutableModel[S, A, R] extends RLModel[S, A, R] {
+
   /**
    * Update the model with a new state, action and reward.
    * Its automatically saved in the model and used for training when number of experiments to batch is reached.
-   *
-   * @param input
-   * @param target
-   * @param reward
    */
-  def trainCase(state: S, nextState: S, target: A, reward: R): Unit
-
-
+  def trainCase(state: S, nextState: S, target: A, reward: R, finish: Boolean): Unit
+  
 }

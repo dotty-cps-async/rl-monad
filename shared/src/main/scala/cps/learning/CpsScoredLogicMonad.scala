@@ -32,6 +32,12 @@ trait CpsScoredLogicMonadContext[F[_], R] extends CpsOrderedLogicMonadContext[F,
 
 }
 
+object CpsScoredLogicMonad {
+  
+  type Curry[R] = [X[_]] =>> CpsScoredLogicMonad[X, R] 
+  
+  
+}
 
 type CpsFloatScoredLogicMonad[F[_]] = CpsScoredLogicMonad[F, Float]
 type CpsDoubleScoredLogicMonad[F[_]] = CpsScoredLogicMonad[F, Double]

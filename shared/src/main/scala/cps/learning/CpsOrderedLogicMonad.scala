@@ -19,6 +19,7 @@ trait CpsOrderedLogicMonad[F[_], R:Ordering] extends CpsLogicMonad[F] {
 
 object CpsOrderedLogicMonad {
 
+  type Curry[R] = [F[_]] =>> CpsOrderedLogicMonad[F, R]
   type WithOrdering[R] = [F[_]] =>> CpsOrderedLogicMonad[F, R]
   
   val DEFAULT_WINDOW_LENGTH = 100

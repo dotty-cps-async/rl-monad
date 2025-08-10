@@ -45,14 +45,19 @@ class RLImmutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RL
     }
 
   override def step(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[(Self, Option[S])] = reify[F] {
-    val a = chooseAction(env, state, mode).reflect
-    env.applyAction(state, a) match
-      case Some((newState, reward)) =>
-        val nextModel = model.trainCase(state, newState, a, reward)
-        RLImmutableModelAgent(nextModel) -> Some(newState)
-      case None =>
-        val nextModel = model.trainCase(state, state, a, RLModel.BIG_NEGATIVE)
-        RLImmutableModelAgent(nextModel) -> None
+    if env.isFinalState(state) then
+      // If state is final, we do not need to choose action and just return the same state
+      RLImmutableModelAgent(model) -> None
+    else
+      val a = chooseAction(env, state, mode).reflect
+      env.applyAction(state, a) match
+        case Some((newState, reward)) =>
+          val finish = env.isFinalState(newState)
+          val nextModel = model.trainCase(state, newState, a, reward, finish)
+          RLImmutableModelAgent(nextModel) -> Some(newState)
+        case None =>
+          val nextModel = model.trainCase(state, state, a, RLModel.BIG_NEGATIVE, false)
+          RLImmutableModelAgent(nextModel) -> None
   }
 
 }
@@ -68,14 +73,17 @@ class RLMutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RLMu
     }
 
   override def step(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[Option[S]] = reify[F] {
-    val a = chooseAction(env, state, mode).reflect
-    env.applyAction(state, a) match
-      case Some((newState, reward)) =>
-        model.trainCase(state, newState, a, reward)
-        Some(newState)
-      case None =>
-        model.trainCase(state, state, a, RLModel.BIG_NEGATIVE)
-        None
+    if (env.isFinalState(state)) then None
+    else
+      val a = chooseAction(env, state, mode).reflect
+      env.applyAction(state, a) match
+        case Some((newState, reward)) =>
+          val finish = env.isFinalState(newState)
+          model.trainCase(state, newState, a, reward, finish)
+          Some(newState)
+        case None =>
+          model.trainCase(state, state, a, RLModel.BIG_NEGATIVE, false)
+          None
   }
 
 
