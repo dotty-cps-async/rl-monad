@@ -529,6 +529,6 @@ object FingerTree {
             )
 
   }
-
+  
 
 }
