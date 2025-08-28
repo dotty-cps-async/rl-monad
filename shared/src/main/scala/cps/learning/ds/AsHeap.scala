@@ -18,7 +18,7 @@ trait AsHeap[H[_]] {
   def insert[A](a: A, heap: H[A]): H[A]
 
   def merge[A](left: H[A], right: H[A]): H[A]
-
+  
   def findMin[A](heap: H[A]): Option[A]
 
   def deletedMin[A](heap: H[A]): H[A]

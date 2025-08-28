@@ -40,17 +40,13 @@ class PairingHeapDupSuite extends FunSuite {
 
     // Merge them all into one heap
     val merged = heap1.merge(heap2).merge(heap3).merge(heap4)
-    println(s"Merged heap: $merged")
-
+  
     // Now extract minimum - this should trigger mergePairs in deletedMin
     val min = merged.findMin
-    println(s"Found min: $min")
-
+  
     val afterDelete = merged.deletedMin
-    println(s"After deletedMin: $afterDelete")
-
+  
     val min2 = afterDelete.findMin
-    println(s"Next min: $min2")
   }
 
   test("PairingHeap - check for duplication using direct operations") {
@@ -59,17 +55,13 @@ class PairingHeapDupSuite extends FunSuite {
     // Create a more complex heap that might expose the duplication issue
     val values = List(5, 3, 7, 1, 9, 2, 8)
     val heap = values.foldLeft(PairingHeap.empty[Int])((h, v) => h.insert(v))
-
-    println(s"Complex heap: $heap")
-
+    
     def extractAllDebug(h: PairingHeap[Int], extracted: List[Int] = Nil): List[Int] = {
       if h.isEmpty then {
-        println(s"Final extracted: $extracted")
         extracted.reverse
       } else {
         val min = h.findMin
         val remaining = h.deletedMin
-        println(s"Extracted: ${min.getOrElse("None")}, remaining: $remaining")
         min match
           case Some(v) => extractAllDebug(remaining, v :: extracted)
           case None => extracted.reverse
@@ -77,8 +69,6 @@ class PairingHeapDupSuite extends FunSuite {
     }
 
     val result = extractAllDebug(heap)
-    println(s"All extracted: $result")
-    println(s"Expected: ${values.sorted}")
 
     // Check for duplicates
     val duplicates = result.diff(result.distinct)

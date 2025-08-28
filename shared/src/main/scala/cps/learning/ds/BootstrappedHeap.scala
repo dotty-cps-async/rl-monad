@@ -1,5 +1,7 @@
 package cps.learning.ds
 
+type BootstrappedPairingHeap[A] = BootstrappedHeap[A, PairingHeap]
+
 sealed trait BootstrappedHeap[A: Ordering, H[_] : AsHeap] {
 
   def elementOrdering: Ordering[A] = summon[Ordering[A]]
@@ -42,7 +44,7 @@ object BootstrappedHeap {
     def insert(newValue: A): BootstrappedHeap[A, H] = {
       merge(singleton(newValue))
     }
-
+    
     def merge(other: BootstrappedHeap[A, H]): BootstrappedHeap[A, H] = {
       other match
         case Empty() => this

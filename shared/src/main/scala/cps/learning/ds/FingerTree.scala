@@ -1,6 +1,7 @@
 package cps.learning.ds
 
-import scala.annotation.unchecked.uncheckedVariance
+import cps.learning.LinearlyOrderedGroup
+
 
 /**
  * Fingdr tree, used as a priiority queue (which is used as CpsScoredMonad).
@@ -17,7 +18,7 @@ sealed trait FingerTree[A, R] {
 
   def rMonoid: FingerTree.Monoid[R]
 
-  def rMeasured: FingerTree.Measured[A, R]
+  def rMeasured: Measured[A, R]
 
   def measure: R
 
@@ -110,10 +111,26 @@ sealed trait FingerTree[A, R] {
     FingerTree.splitTree(p, acc, this)(using rMeasured, rMonoid)
   }
 
+  def findMax(using rOrdering: Ordering[R]): Option[A] = {
+    if (isEmpty) None
+    else {
+      FingerTree.splitTree(r => rOrdering.gteq(r, this.measure), rMonoid.zero, this)(using rMeasured, rMonoid) match {
+        case FingerTree.Split(_, pivot, _) => Some(pivot)
+      }
+    }
+  }
+
+  def findMaxMeasure(using rOrdering: Ordering[R]): Option[R] = {
+    if (isEmpty) None
+    else {
+      Some(this.measure)
+    }
+  }
+
   def dequeueMax(using rOrdering: Ordering[R]): (A, FingerTree[A, R]) = {
 
     def p(r: R): Boolean = {
-      rOrdering.gteq(r,this.measure)
+      rOrdering.gteq(r, this.measure)
     }
 
     FingerTree.splitTree(p, rMonoid.zero, this)(using rMeasured, rMonoid) match {
@@ -127,16 +144,12 @@ sealed trait FingerTree[A, R] {
 object FingerTree {
 
 
-  @FunctionalInterface
-  trait Measured[-A, +R] {
-    def measure(a: A): R
-  }
-
   trait Monoid[R] {
     def zero: R
 
     def combine(x: R, y: R): R
   }
+
 
   extension [R](self: R)(using m: Monoid[R]) {
     def |+|(other: R): R = m.combine(self, other)
@@ -246,6 +259,18 @@ object FingerTree {
       case Node3(a, b, c, _) => Digit.Three(a, b, c)
     }
 
+    def find(p: R => Boolean, acc: R)(using m: Measured[A, R], r: Monoid[R]): Option[A] = this match {
+      case Node2(a, b, measure) =>
+        if (p(acc |+| m.measure(a))) then Some(a)
+        else if (p(acc |+| m.measure(b))) then Some(b)
+        else None
+      case Node3(a, b, c, measure) =>
+        if (p(acc |+| m.measure(a)) == a) then Some(a)
+        else if (p(acc |+| m.measure(b)) == b) then Some(b)
+        else if (p(acc |+| m.measure(c)) == c) then Some(c)
+        else None
+    }
+
   }
 
   given [A, R](using m: Measured[A, R], r: Monoid[R]): Measured[FingerTree[A, R], R] with {
@@ -336,8 +361,47 @@ object FingerTree {
       case Four(a, b, c, _) => Some(Three(a, b, c))
     }
 
+    def find[R](p: R => Boolean, acc: R)(using m: Measured[A, R], r: Monoid[R]): Option[A] = {
+      this match
+        case One(a) =>
+          if p(acc |+| m.measure(a)) then Some(a) else None
+        case Two(a, b) =>
+          val acc1 = acc |+| m.measure(a)
+          if p(acc1) then Some(a)
+          else {
+            val acc2 = acc1 |+| m.measure(b)
+            if p(acc2) then Some(b) else None
+          }
+        case Three(a, b, c) =>
+          val acc1 = acc |+| m.measure(a)
+          if p(acc1) then Some(a)
+          else {
+            val acc2 = acc1 |+| m.measure(b)
+            if (p(acc2) == b) Some(b)
+            else {
+              val acc3 = acc2 |+| m.measure(c)
+              if (p(acc3) == c) Some(c) else None
+            }
+          }
+        case Four(a, b, c, d) =>
+          val acc1 = acc |+| m.measure(a)
+          if (p(acc1) == a) Some(a)
+          else {
+            val acc2 = acc1 |+| m.measure(b)
+            if (p(acc2) == b) Some(b)
+            else {
+              val acc3 = acc2 |+| m.measure(c)
+              if (p(acc3) == c) Some(c)
+              else {
+                val acc4 = acc3 |+| m.measure(d)
+                if (p(acc4) == d) Some(d) else None
+              }
+            }
+          }
+    }
+
   }
-  
+
   extension [A](optD: Option[Digit[A]]) {
     def toTree[R](using Measured[A, R], Monoid[R]): FingerTree[A, R] = optD match {
       case None => FingerTree.Empty()
@@ -529,6 +593,27 @@ object FingerTree {
             )
 
   }
-  
+
+  /**
+   * Find an element in the tree that satisfies the predicate `p` when combined with the accumulated measure `acc`.
+   * Returns the first element that satisfies the condition.
+   */
+  def find[A, R](p: R => Boolean, acc: R, tree: FingerTree[A, R])(using Measured[A, R], Monoid[R], Ordering[R]): Option[A] = {
+    tree match {
+      case FingerTree.Empty() => None
+      case FingerTree.Single(a) =>
+        if (p(acc |+| summon[Measured[A, R]].measure(a))) Some(a)
+        else None
+      case FingerTree.Deep(prefix, middle, suffix, measure) =>
+        prefix.find(p, acc).orElse {
+          val acc1 = acc |+| prefix.measure
+          find(p, acc1, middle) match
+            case Some(node) => node.find(p, acc1)
+            case None =>
+              suffix.find(p, acc1 |+| middle.measure)
+        }
+    }
+  }
+
 
 }

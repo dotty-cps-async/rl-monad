@@ -5,15 +5,21 @@ import cps.monads.logic.*
 import cps.syntax.*
 
 
+/**
+ * Order the branches of the computation (inside some window) by a scoring function.
+ */
 trait CpsOrderedLogicMonad[F[_], R:Ordering] extends CpsLogicMonad[F] {
 
   type Context <: CpsOrderedLogicMonadContext[F, R]
 
   /**
-   * Order the branches of the computation (inside some window) by a scoring function.
+   * Set ordering for the branches of the computation, 
+   * Typpical usage:
+   *  ```scala
+   *  val alterna = m.orderBy(score, windowLength)
+   *  ```
    */
   def order[A](m: F[A])(score: A=>R, windowLength: Int = CpsOrderedLogicMonad.DEFAULT_WINDOW_LENGTH): F[A]
-
   
 }
 

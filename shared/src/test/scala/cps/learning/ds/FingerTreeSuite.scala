@@ -51,9 +51,6 @@ class FingerTreeSuite extends FunSuite {
 
     val (max, remaining) = tree.dequeueMax
 
-    println(s"3. teee=${tree}")
-    println(s"3. max=${max}")
-    println(s"3. remaining=${remaining}")
 
     assertEquals(max, IntWithMax(9))
 

@@ -14,11 +14,11 @@ sealed trait PairingHeap[A: Ordering] {
   def insert(newValue: A): PairingHeap[A]
 
   def merge(other: PairingHeap[A]): PairingHeap[A]
-
+  
   def findMin: Option[A]
 
   def deletedMin: PairingHeap[A]
-
+  
 }
 
 object PairingHeap {
@@ -31,7 +31,7 @@ object PairingHeap {
 
     def merge(other: PairingHeap[A]): PairingHeap[A] =
       other
-
+    
     def findMin: Option[A] =
       None
 
@@ -58,7 +58,7 @@ object PairingHeap {
           else
             Node(otherValue, this :: otherChildren)
     }
-
+    
     def findMin: Option[A] = {
       Some(value)
     }
@@ -86,7 +86,7 @@ object PairingHeap {
     // Standard pairing heap mergePairs algorithm:
     // 1. Left-to-right pass: merge adjacent pairs
     // 2. Right-to-left pass: merge all results together
-    
+
     @annotation.tailrec
     def pairwiseMerge(heaps: List[PairingHeap[A]], acc: List[PairingHeap[A]]): List[PairingHeap[A]] = {
       heaps match {
@@ -95,7 +95,7 @@ object PairingHeap {
         case h1 :: h2 :: tail => pairwiseMerge(tail, h1.merge(h2) :: acc)
       }
     }
-    
+
     def mergeFromRight(heaps: List[PairingHeap[A]]): PairingHeap[A] = {
       heaps match {
         case Nil => Empty()
@@ -103,7 +103,7 @@ object PairingHeap {
         case h :: tail => h.merge(mergeFromRight(tail))
       }
     }
-    
+
     children match {
       case Nil => Empty()
       case _ => mergeFromRight(pairwiseMerge(children, Nil))
@@ -121,7 +121,7 @@ object PairingHeap {
     def insert[A](a: A, heap: PairingHeap[A]): PairingHeap[A] = heap.insert(a)
 
     def merge[A](left: PairingHeap[A], right: PairingHeap[A]): PairingHeap[A] = left.merge(right)
-
+    
     def findMin[A](heap: PairingHeap[A]): Option[A] = heap.findMin
 
     def deletedMin[A](heap: PairingHeap[A]): PairingHeap[A] = heap.deletedMin
