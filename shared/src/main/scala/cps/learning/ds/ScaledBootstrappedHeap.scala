@@ -35,7 +35,8 @@ object ScaledBootstrappedHeap {
 
     override def elementMeasure(elem: A): R = summon[Measured[A, R]].measure(elem)
 
-    def insert(value: A): ScaledBootstrappedHeap[A, R, H] = Node(value, summon[AsScaledHeap[H, R]].empty, summon[LinearlyOrderedGroup[R]].one)
+    def insert(value: A): ScaledBootstrappedHeap[A, R, H] =
+      Node(value, summon[AsScaledHeap[H, R]].empty, summon[LinearlyOrderedGroup[R]].one)
 
     def merge(other: ScaledBootstrappedHeap[A, R, H]): ScaledBootstrappedHeap[A, R, H] = other
 
@@ -114,7 +115,7 @@ object ScaledBootstrappedHeap {
 
     def isEmpty[A](h: ScaledBootstrappedHeap[A, R, H]): Boolean = h.isEmpty
 
-    def insert[A](a: A, heap: ScaledBootstrappedHeap[A, R, H]): ScaledBootstrappedHeap[A, R, H] = heap.insert(a)
+    def insert[A](e: A, heap: ScaledBootstrappedHeap[A, R, H]): ScaledBootstrappedHeap[A, R, H] = heap.insert(e)
 
     def merge[A](left: ScaledBootstrappedHeap[A, R, H], right: ScaledBootstrappedHeap[A, R, H]): ScaledBootstrappedHeap[A, R, H] = left.merge(right)
 
@@ -127,6 +128,7 @@ object ScaledBootstrappedHeap {
         case Empty() => heap
         case Node(v, subheaps, currentFactor) =>
           given Measured[A, R] = heap.elementMeasured
+
           Node(v, subheaps, factor |*| currentFactor)
 
   }

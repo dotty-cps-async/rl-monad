@@ -3,13 +3,13 @@ package cps.learning
 import scala.util.Try
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
-
-import cps.CpsTryMonad
+import cps.*
+import cps.syntax.{flatMap, map}
 import cps.learning.ds.*
 import cps.learning.ds.MinMax.given
 
 
-sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup] {
+sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy] {
 
   import ScoredLogicStreamT.*
 
@@ -23,26 +23,39 @@ sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup] 
 
   def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R]
 
+  def map[B](f: A => B): ScoredLogicStreamT[F, B, R] = flatMap(a => Pure(f(a), one))
+
   def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R]
 
   def flatMapTry[B](f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R]
+
+  def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]]
+
+  def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R]
 
 }
 
 object ScoredLogicStreamT {
 
-  type DefaultQueue[A, R] = ScaledBootstrappedPairingHeap[(A,R), R]
+  type DefaultQueue[A, R] = ScaledBootstrappedPairingHeap[(A, R), R]
+
+  type DefaultSizedQueue[A, R] = ScaledPriorityQueueWithSize[DefaultQueue, A, R]
 
   def asPQ[A, R: LinearlyOrderedGroup]: AsScaledPriorityQueue[DefaultQueue, R] = {
     summon[AsScaledPriorityQueue[DefaultQueue, R]]
+  }
+
+  def asSSPQ[A, R: LinearlyOrderedGroup]: AsSizedScaledPriorityQueue[DefaultSizedQueue, R] = {
+    summon[AsSizedScaledPriorityQueue[DefaultSizedQueue, R]]
   }
 
   def R[R](using LinearlyOrderedMultiplicativeMonoid[R]) = summon[LinearlyOrderedMultiplicativeMonoid[R]]
 
   def one[R](using LinearlyOrderedMultiplicativeMonoid[R]) = summon[LinearlyOrderedMultiplicativeMonoid[R]].one
 
+  def lsPolicy[R](using lp: LogicalSearchPolicy[R]) = lp
 
-  case class Empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup]() extends ScoredLogicStreamT[F, A, R] {
+  case class Empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]() extends ScoredLogicStreamT[F, A, R] {
 
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] =
@@ -60,9 +73,16 @@ object ScoredLogicStreamT {
     override def flatMapTry[B](f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
       Empty()
 
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      summon[CpsTryMonad[F]].pure(None)
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      Pure(None, R.one)
+    }
+
   }
 
-  case class Pure[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](value: A, score: R) extends ScoredLogicStreamT[F, A, R] {
+  case class Pure[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](value: A, score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
       Pure(value, summon[LinearlyOrderedMultiplicativeMonoid[R]].times(score, r))
@@ -74,21 +94,21 @@ object ScoredLogicStreamT {
         case c if c <= 0 => otherScore
         case _ => score
       }
-      Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), one)
+      Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), asSSPQ.empty)
     }
 
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
       other match
         case Empty() => this
         case Pure(otherValue, otherScore) =>
-          Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), one)
+          Queue.empty.enqueue(this, score).enqueue(other, otherScore)
         case err@Error(e) => err
         case w@WaitF(waited, otherScore) =>
-          Queue(asPQ.enqueue(w, otherScore, asPQ.enqueue(this, score, asPQ.empty)), one)
+          Queue.empty.enqueue(this, score).enqueue(other, otherScore)
         case s@Suspend(thunk, otherScore) =>
-          Queue(asPQ.enqueue(s, otherScore, asPQ.enqueue(this, score, asPQ.empty)), one)
-        case q@Queue(pq, multiplier) =>
-          Queue(asPQ.enqueue(this, score |/| multiplier, pq), multiplier)
+          Queue.empty.enqueue(this, score).enqueue(other, otherScore)
+        case q@Queue(_, _) =>
+          q.enqueue(this, score)
     }
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] = {
@@ -105,9 +125,16 @@ object ScoredLogicStreamT {
         case NonFatal(e) => Error(e)
     }
 
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      summon[CpsTryMonad[F]].pure(Some((Success(value), Empty())))
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      Pure(Some((Success(value), Empty())), R.one |*| score)
+    }
+
   }
 
-  case class Error[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](error: Throwable) extends ScoredLogicStreamT[F, A, R] {
+  case class Error[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](error: Throwable) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] = this
 
@@ -129,10 +156,16 @@ object ScoredLogicStreamT {
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
       this
 
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      summon[CpsTryMonad[F]].pure(Some((Failure(error), Empty())))
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      Pure(Some((Failure(error), Empty())), R.one |*| maxScore)
+    }
 
   }
 
-  case class WaitF[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](waited: F[ScoredLogicStreamT[F, A, R]], score: R) extends ScoredLogicStreamT[F, A, R] {
+  case class WaitF[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](waited: F[ScoredLogicStreamT[F, A, R]], score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
       WaitF(waited, summon[LinearlyOrderedMultiplicativeMonoid[R]].times(score, r))
@@ -141,12 +174,11 @@ object ScoredLogicStreamT {
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] = {
       val maxScore = R.max(score, otherScore)
-      Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), one)
+      Queue.empty.enqueue(this, score).enqueue(Suspend(() => other, otherScore), otherScore)
     }
 
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
       WaitF(LM.observerCpsMonad.map(waited)(x => (x |*| score).merge(other)), R.max(score, other.maxScore))
-
     }
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
@@ -155,9 +187,25 @@ object ScoredLogicStreamT {
     override def flatMapTry[B](f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
       WaitF(summon[CpsTryMonad[F]].flatMap(waited)(s => summon[CpsTryMonad[F]].pure(s.flatMapTry(f))), score)
 
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      summon[CpsTryMonad[F]].flatMap(waited) { s =>
+        summon[CpsTryMonad[F]].map(s.fsplit) {
+          case None => None
+          case Some((tryHead, rest)) =>
+            Some((tryHead, rest))
+        }
+      }
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      WaitF(summon[CpsTryMonad[F]].map(waited) { s =>
+        s.msplit
+      }, score)
+    }
+
   }
 
-  case class Suspend[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](thunk: () => ScoredLogicStreamT[F, A, R], score: R) extends ScoredLogicStreamT[F, A, R] {
+  case class Suspend[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](
+                                                                                            thunk: () => ScoredLogicStreamT[F, A, R], score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
       Suspend(thunk, R.times(score, r))
@@ -165,7 +213,7 @@ object ScoredLogicStreamT {
     def maxScore: R = score
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] = {
-      Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), R.one)
+      Queue.empty.enqueue(this, score).enqueue(Suspend(() => other, otherScore), otherScore)
     }
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
@@ -177,87 +225,219 @@ object ScoredLogicStreamT {
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
       other match
         case Empty() => this
-        case Pure(otherValue, otherScore) =>
-          Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), R.one)
+        case p@Pure(otherValue, otherScore) =>
+          Queue(asPQ.enqueue(this, score, asPQ.empty), asSSPQ.enqueue(p, otherScore, asSSPQ.empty))
         case err@Error(e) => err
         case w@WaitF(waited, otherScore) =>
-          Queue(asPQ.enqueue(w, otherScore, asPQ.enqueue(this, score, asPQ.empty)), R.one)
+          Queue(asPQ.enqueue(w, otherScore, asPQ.enqueue(this, score, asPQ.empty)), asSSPQ.empty)
         case s@Suspend(thunk2, otherScore) =>
-          Queue(asPQ.enqueue(s, otherScore, asPQ.enqueue(this, score, asPQ.empty)), R.one)
-        case q@Queue(pq, multiplier) =>
-          Queue(asPQ.enqueue(this, score |/| multiplier, pq), multiplier)
+          Queue(asPQ.enqueue(s, otherScore, asPQ.enqueue(this, score, asPQ.empty)), asSSPQ.empty)
+        case q: Queue[F, A, R] =>
+          q.enqueue(this, score)
+    }
 
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      try {
+        thunk().fsplit
+      } catch {
+        case NonFatal(e) =>
+          summon[CpsTryMonad[F]].pure(Some((Failure(e), Empty())))
+      }
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      Suspend(() => thunk().msplit, score)
     }
 
   }
 
 
-  case class Queue[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](pq: DefaultQueue[ScoredLogicStreamT[F, A, R], R], multiplier: R) extends ScoredLogicStreamT[F, A, R] {
+  case class Queue[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](streams: DefaultQueue[ScoredLogicStreamT[F, A, R], R], resultPool: DefaultSizedQueue[Pure[F, A, R], R]) extends ScoredLogicStreamT[F, A, R] {
+
+    def enqueue(other: ScoredLogicStreamT[F, A, R], otherScore: R): Queue[F, A, R] = {
+      Queue(asPQ.enqueue(other, otherScore, streams), resultPool)
+    }
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] = {
-      Queue(pq, R.times(multiplier, r))
+      Queue(streams.scale(r), resultPool.scale(r))
+    }
+
+    def dequeue: Option[(ScoredLogicStreamT[F, A, R], Queue[F, A, R])] = {
+      resultPool.findMaxPriority match {
+        case Some(rpPrirority) =>
+          asPQ.findMaxPriority(streams) match
+            case Some(streamsPriority) =>
+              if (summon[Ordering[R]].gteq(rpPrirority, streamsPriority)) then
+                val (Some(frs), tailPool) = resultPool.dequeue: @unchecked
+                Some(frs, Queue(streams, tailPool))
+              else
+                val (Some(frs), tail) = asPQ.dequeue(streams): @unchecked
+                Some((frs, Queue(tail, resultPool)))
+            case None =>
+              val (Some(frs), tailPool) = resultPool.dequeue: @unchecked
+              Some(frs, Queue(streams, tailPool))
+        case None =>
+          // resultPool is empty
+          val (optFrs, tail) = asPQ.dequeue(streams)
+          optFrs match
+            case None =>
+              None
+            case Some(frs) =>
+              Some((frs, Queue(tail, resultPool)))
+      }
     }
 
     def maxScore: R = {
-      asPQ.findMaxPriority(pq) match
-        case None => R.zero
-        case Some(maxPriority) => R.times(maxPriority, multiplier)
+      asPQ.findMaxPriority(streams) match
+        case None =>
+          resultPool.findMaxPriority match {
+            case None => R.zero
+            case Some(rpMaxPriority) => rpMaxPriority
+          }
+        case Some(maxPriority) =>
+          resultPool.findMaxPriority match {
+            case None => maxPriority
+            case Some(rpMaxPriority) => R.max(maxPriority, rpMaxPriority)
+          }
     }
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] = {
-      asPQ.findMaxPriority(pq) match
+      asPQ.findMaxPriority(streams) match
         case None =>
           Suspend(() => other, otherScore)
         case Some(maxPriority) =>
-          val otherSuspended = Suspend(() => other, otherScore |/| multiplier)
-          Queue(asPQ.enqueue(otherSuspended, otherScore, pq), multiplier)
+          val otherSuspended = Suspend(() => other, otherScore)
+          Queue(asPQ.enqueue(otherSuspended, otherScore, streams), asSSPQ.empty)
     }
 
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
       other match {
         case Empty() => this
         case Pure(otherValue, otherScore) =>
-          Queue(asPQ.enqueue(other, otherScore |/| multiplier, pq), multiplier)
+          enqueue(other, otherScore)
         case err@Error(e) => err
         case w@WaitF(waited, otherScore) =>
-          Queue(asPQ.enqueue(w, otherScore |/| multiplier, pq), multiplier)
+          enqueue(w, otherScore)
         case s@Suspend(thunk2, otherScore) =>
-          Queue(asPQ.enqueue(s, otherScore |/| multiplier, pq), multiplier)
-        case q@Queue(otherPq, otherMultiplier) =>
-          ???
+          enqueue(s, otherScore)
+        case q@Queue(otherStreams, otherResultPool) =>
+          Queue(asPQ.merge(streams, otherStreams), asSSPQ.merge(resultPool, otherResultPool))
       }
 
     }
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] = {
-      val (optFrs, tail) = asPQ.dequeue(pq)
-      optFrs match
+      dequeue match
         case None => Empty()
-        case Some(frs) =>
-          val waiter = LM.observerCpsMonad.map(LM.fsplit(frs)) {
-            case None => Queue(tail, multiplier).flatMap(f)
-            case Some((tryHead, rest)) =>
-              tryHead match
-                case scala.util.Failure(e) =>
-                  LM.error[B](e)
-                case scala.util.Success(head) =>
-                  (f(head) |*| multiplier).merge(Queue(tail, multiplier).flatMap(f))
-          }
-          WaitF(waiter, R.maxPositiveValue)
+        case Some((frs, tail)) =>
+          frs.flatMap(f).merge(tail.flatMap(f))
     }
+
+    override def flatMapTry[B](f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] = {
+      dequeue match {
+        case None => Empty()
+        case Some((frs, tail)) =>
+          frs.flatMapTry(f).merge(tail.flatMapTry(f))
+      }
+    }
+
+    override def fsplit: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] = {
+
+      def getFromResultPool: F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] = {
+        resultPool.dequeue match
+          case (Some(frs), tailPool) =>
+            summon[CpsTryMonad[F]].pure(Some((Success(frs.value), Queue(streams, tailPool))))
+          case (None, _) =>
+            summon[CpsTryMonad[F]].pure(None)
+      }
+
+      def getFromStream(backupFromResultPool: Boolean): F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] = {
+        val (optFrs, tail) = asPQ.dequeue(streams)
+        optFrs match
+          case None =>
+            if backupFromResultPool then
+              getFromResultPool
+            else
+              summon[CpsTryMonad[F]].pure(None)
+          case Some(frs) =>
+            frs match
+              case Empty() =>
+                Queue(tail, resultPool).fsplit
+              case p@Pure(value, score) =>
+                summon[CpsTryMonad[F]].pure(Some((Success(value), Queue(tail, resultPool))))
+              case err@Error(e) =>
+                summon[CpsTryMonad[F]].pure(Some((Failure(e), Queue(tail, resultPool))))
+              case w@WaitF(waited, score) =>
+                waited.flatMap { s =>
+                  s.fsplit
+                }.flatMap {
+                  case None => Queue(tail, resultPool).fsplit
+                  case Some((tryHead, rest)) =>
+                    summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
+                }
+              case s@Suspend(thunk, score) =>
+                try
+                  thunk().fsplit.flatMap {
+                    case None => Queue(tail, resultPool).fsplit
+                    case Some((tryHead, rest)) =>
+                      summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
+                  }
+                catch
+                  case NonFatal(e) =>
+                    summon[CpsTryMonad[F]].pure(Some((Failure(e), Queue(tail, resultPool))))
+              case q@Queue(_, _) =>
+                LM.observerCpsMonad.flatMap(q.fsplit) {
+                  case None => Queue(tail, resultPool).fsplit
+                  case Some((tryHead, rest)) =>
+                    LM.observerCpsMonad.pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
+                }
+      }
+
+
+      resultPool.findMaxPriority match {
+        case Some(resultPoolPriority) =>
+          asPQ.findMaxPriority(streams) match {
+            case Some(streamsPriority) =>
+              if (summon[Ordering[R]].gteq(resultPoolPriority, streamsPriority)) then
+                getFromResultPool
+              else if lsPolicy.maxSuboptimalResultPool > 0 && resultPool.size >= lsPolicy.maxSuboptimalResultPool then
+                getFromResultPool
+              else
+                getFromStream(backupFromResultPool = true)
+            case None =>
+              getFromResultPool
+          }
+        case None =>
+          getFromStream(backupFromResultPool = false)
+      }
+    }
+
+    override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
+      val fStream = fsplit.map {
+        singleton(_, R.one)
+      }
+      WaitF(fStream, R.one)
+    }
+
 
   }
 
+  object Queue {
+    def empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]: Queue[F, A, R] =
+      Queue(asPQ.empty, asSSPQ.empty)
+  }
 
-  def empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup]: ScoredLogicStreamT[F, A, R] = Empty()
 
-  def singleton[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup](value: A, priority: R): ScoredLogicStreamT[F, A, R] = Pure(value, priority)
+  def empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]: ScoredLogicStreamT[F, A, R] = Empty()
 
-  class ScoredLogicStreamTMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup]
+  def singleton[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](value: A, priority: R): ScoredLogicStreamT[F, A, R] =
+    Pure(value, priority)
+
+  class ScoredLogicStreamTMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup : LogicalSearchPolicy]
     extends CpsScoredLogicMonadInstanceContext[[A] =>> ScoredLogicStreamT[F, A, R], R] {
 
     override type Observer[A] = F[A]
 
+    override val observerCpsMonad: CpsTryMonad[F] = summon[CpsTryMonad[F]]
 
     override def pure[T](t: T): ScoredLogicStreamT[F, T, R] = ScoredLogicStreamT.Pure(t, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
 
@@ -267,17 +447,40 @@ object ScoredLogicStreamT {
 
     override def scoredPure[A](a: A, score: R): ScoredLogicStreamT[F, A, R] = ScoredLogicStreamT.Pure(a, score)
 
+    override def mplus[A](a: ScoredLogicStreamT[F, A, R], b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
+      a.scoredMplus(b, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
+
     override def scoredMplus[A](a: ScoredLogicStreamT[F, A, R], bScore: R, b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
       a.scoredMplus(b, bScore)
+
+    override def map[A, B](fa: ScoredLogicStreamT[F, A, R])(f: A => B): ScoredLogicStreamT[F, B, R] =
+      fa.map(f)
 
     override def flatMap[A, B](fa: ScoredLogicStreamT[F, A, R])(f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
       fa.flatMap(f)
 
+    override def flatMapTry[A, B](fa: ScoredLogicStreamT[F, A, R])(f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
+      fa.flatMapTry(f)
 
+
+    override def flattenObserver[A](fma: F[ScoredLogicStreamT[F, A, R]]): ScoredLogicStreamT[F, A, R] =
+      ScoredLogicStreamT.WaitF(fma, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
+
+
+    override def fsplit[A](c: ScoredLogicStreamT[F, A, R]): F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
+      c.fsplit
+
+    override def msplit[A](c: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] =
+      c.msplit
+
+    //this is implemented in the next versions of logic, 
+    //TODO: remove after dotty-cps-async logic 1.1.3 release
+    
+    
   }
 
 
-  given cpsScoredLogicMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup]: ScoredLogicStreamTMonad[F, R] =
+  given cpsScoredLogicMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup : LogicalSearchPolicy]: ScoredLogicStreamTMonad[F, R] =
     new ScoredLogicStreamTMonad[F, R]
 
 

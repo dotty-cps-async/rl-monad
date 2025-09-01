@@ -20,6 +20,8 @@ trait AsScaledPriorityQueue[H[_, _], R: LinearlyOrderedGroup] {
 
   def findMaxPriority[A](queue: H[A, R]): Option[R]
 
+  def merge[A](x: H[A, R], y: H[A, R]): H[A, R]
+
   def scale[A](queue: H[A, R], factor: R): H[A, R]
 
 }
@@ -63,6 +65,10 @@ object AsScaledPriorityQueue {
 
     def findMaxPriority[A](queue: H[(A, R), R]): Option[R] = {
       H.findMax(queue).map(_._2)
+    }
+
+    override def merge[A](x: H[(A, R), R], y: H[(A, R), R]): H[(A, R), R] = {
+      H.merge(x, y)
     }
 
     def scale[A](queue: H[(A, R), R], factor: R): H[(A, R), R] = {
@@ -111,6 +117,10 @@ object AsScaledPriorityQueue {
         Some(queue.measure)
     }
 
+    override def merge[A](x: ScaledFingerTreeHeap[A, R], y: ScaledFingerTreeHeap[A, R]): ScaledFingerTreeHeap[A, R] = {
+      ScaledMaxFingerTree.concat(x, y)
+    }
+
     override def scale[A](queue: ScaledFingerTreeHeap[A, R], factor: R): ScaledFingerTreeHeap[A, R] = {
       queue.scale(factor)
     }
@@ -133,9 +143,7 @@ trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R]
   type Curry1[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
   type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
 
-  case class HeapPairWithSize[H[_, _], A, R](heap: H[(A, R), R], size: Int)
-
-  given heapAsSizedScaledPriorityQueue[H[_, _], R](using heap: AsScaledHeap[H, R], group: LinearlyOrderedGroup[R]): AsScaledPriorityQueue[[A, R] =>> HeapPairWithSize[H, A, R], R] with {
+  given heapAsSizedScaledPriorityQueue[H[_, _], R](using heap: AsScaledHeap[H, R], group: LinearlyOrderedGroup[R]): AsScaledPriorityQueue[[A1, R1] =>> HeapPairWithSize[H, A1, R1], R] with {
 
     def rOrdering: Ordering[R] = group
 
@@ -145,7 +153,7 @@ trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R]
       def measure(pair: (A, R)): R = pair._2
     }
 
-    def empty[A]: HeapPairWithSize[H, A, R] = HeapPairWithSize(heap.empty[(A, R)], 0)
+    def empty[A]: HeapPairWithSize[H, A, R] = HeapPairWithSize(heap.empty, 0)
 
     def isEmpty[A](queue: HeapPairWithSize[H, A, R]): Boolean =
       heap.isEmpty(queue.heap)
@@ -168,12 +176,16 @@ trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R]
       heap.findMax(queue.heap).map(_._2)
     }
 
-    def size[A](queue: HeapPairWithSize[H, A, R]): Int = {
-      queue.size
+    override def merge[A](x: HeapPairWithSize[H, A, R], y: HeapPairWithSize[H, A, R]): HeapPairWithSize[H, A, R] = {
+      HeapPairWithSize(heap.merge(x.heap, y.heap), x.size + y.size)
     }
 
     def scale[A](queue: HeapPairWithSize[H, A, R], factor: R): HeapPairWithSize[H, A, R] = {
       HeapPairWithSize(heap.scale(queue.heap, factor), queue.size)
+    }
+
+    def size[A](queue: HeapPairWithSize[H, A, R]): Int = {
+      queue.size
     }
 
   }

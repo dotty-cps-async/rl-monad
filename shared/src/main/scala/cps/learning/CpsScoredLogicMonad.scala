@@ -9,7 +9,7 @@ import cps.monads.logic.*
  *
  * @tparam F
  */
-trait CpsScoredLogicMonad[F[_], R: Ordering] extends CpsLogicMonad[F] {
+trait CpsScoredLogicMonad[F[_], R: LinearlyOrderedGroup] extends CpsLogicMonad[F] {
 
   type Context <: CpsScoredLogicMonadContext[F, R]
 

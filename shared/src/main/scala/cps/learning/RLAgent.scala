@@ -7,15 +7,32 @@ enum AgentRunningMode {
   case Explore, Exploit
 }
 
-trait RLAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] {
+trait RLAgentBehavior[F[_] : CpsFloatOrderedLogicMonad, S, A] {
 
-  def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A]
+  type AgentState
+
+  def chooseAction(env: RLEnvironment[S, A], envState: S, agentState: AgentState, mode: AgentRunningMode): F[A]
+
+  def performStep(env: RLEnvironment[S, A], envState: S, agentState: AgentState, mode: AgentRunningMode): F[(Option[S], AgentState)]
 
 }
+
+
+
+trait RLAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] {
+
+  type AgentState
+
+  def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A]
+  
+}
+
 
 trait RLImmutableAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] extends RLAgent[F, S, A] {
 
   type Self <: RLImmutableAgent[F, S, A]
+
+  type AgentStep = Self
 
   def step(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[(Self, Option[S])]
 
@@ -23,6 +40,10 @@ trait RLImmutableAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] extends RLAgent[F
 
 
 trait RLMutableAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] extends RLAgent[F, S, A] {
+
+  type Self = this.type
+
+  type AgentState = Self
 
   /**
    * Perform step in environment, choose action and change own state.
@@ -36,7 +57,8 @@ class RLImmutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RL
 
   type Self = RLImmutableModelAgent[F, M, S, A]
 
-  override def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
+  
+  def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
     reify[F] {
       val possibleActions = env.possibleActions[F](state)
       // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
@@ -64,7 +86,8 @@ class RLImmutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RL
 
 class RLMutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RLMutableModel[S, A, Float]) extends RLMutableAgent[F, S, A] {
 
-  override def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
+  
+  def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
     reify[F] {
       val possibleActions = env.possibleActions[F](state)
       // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
