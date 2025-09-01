@@ -501,5 +501,53 @@ object ScaledMaxFingerTree {
     app3(left, List.empty, right)
   }
 
+  /*
+  class AsScaledPriorityQueueImpl[R: LinearlyOrderedGroup] extends AsScaledPriorityQueue[ScaledMaxFingerTree, R] {
 
+    override def rOrdering: Ordering[R] = summon[LinearlyOrderedGroup[R]]
+
+    def oneElementMeasure[A]: Measured[A, R] = new Measured[A, R] {
+      def measure(a: A): R = summon[LinearlyOrderedGroup[R]].one
+    }
+
+    override def empty[A]: ScaledMaxFingerTree[A, R] = {
+      ScaledMaxFingerTree.empty[A, R](using oneElementMeasure, summon[LinearlyOrderedGroup[R]])
+    }
+
+    override def isEmpty[A](queue: ScaledMaxFingerTree[A, R]): Boolean = {
+      queue.isEmpty
+    }
+
+    override def enqueue[A](a: A, priority: R, queue: ScaledMaxFingerTree[A, R]): ScaledMaxFingerTree[A, R] = {
+      queue.prepended(ScaledValue(a, priority))
+    }
+
+    override def dequeue[A](queue: ScaledMaxFingerTree[A, R]): (Option[A], ScaledMaxFingerTree[A, R]) = {
+      queue.dequeueMax
+    }
+
+    override def peek[A](queue: ScaledMaxFingerTree[A, R]): Option[A] = {
+      queue.findMax
+    }
+
+    override def findMaxPriority[A](queue: ScaledMaxFingerTree[A, R]): Option[R] = {
+      if (queue.isEmpty) then None
+      else
+        Some(queue.measure)
+    }
+
+    override def merge[A](x: ScaledMaxFingerTree[A, R], y: ScaledMaxFingerTree[A, R]): ScaledMaxFingerTree[A, R] = {
+      given Measured[A, R] = oneElementMeasure
+
+      concat(x, y)
+    }
+
+    override def scale[A](queue: ScaledMaxFingerTree[A, R], factor: R): ScaledMaxFingerTree[A, R] = {
+      queue.scale(factor)
+    }
+
+  }
+
+  given [R: LinearlyOrderedGroup]: AsScaledPriorityQueue[ScaledMaxFingerTree, R] = AsScaledPriorityQueueImpl[R]
+  */
 }

@@ -12,9 +12,9 @@ sealed trait BootstrappedHeap[A: Ordering, H[_] : AsHeap] {
 
   def merge(other: BootstrappedHeap[A, H]): BootstrappedHeap[A, H]
 
-  def findMin: Option[A]
+  def findMax: Option[A]
 
-  def deletedMin: BootstrappedHeap[A, H]
+  def deletedMax: BootstrappedHeap[A, H]
 
 }
 
@@ -29,9 +29,9 @@ object BootstrappedHeap {
 
     def merge(other: BootstrappedHeap[A, H]): BootstrappedHeap[A, H] = other
 
-    def findMin: Option[A] = None
+    def findMax: Option[A] = None
 
-    def deletedMin: BootstrappedHeap[A, H] = this
+    def deletedMax: BootstrappedHeap[A, H] = this
 
   }
 
@@ -49,23 +49,23 @@ object BootstrappedHeap {
       other match
         case Empty() => this
         case Node(otherValue, otherSubheaps) =>
-          if summon[Ordering[A]].lt(value, otherValue) then
+          if summon[Ordering[A]].gt(value, otherValue) then
             Node(value, H.insert(other, subheaps))
           else
             Node(otherValue, H.insert(this, otherSubheaps))
     }
 
-    def findMin: Option[A] = Some(value)
+    def findMax: Option[A] = Some(value)
 
-    def deletedMin: BootstrappedHeap[A, H] = {
-      H.findMin(subheaps) match
-        case Some(minHeap) =>
-          minHeap match
+    def deletedMax: BootstrappedHeap[A, H] = {
+      H.findMax(subheaps) match
+        case Some(maxHeap) =>
+          maxHeap match
             case Empty() =>
               // impossibe
               throw new IllegalStateException("Deleted min from an empty heap")
             case Node(y, p1) =>
-              val p2 = H.deletedMin(subheaps)
+              val p2 = H.deletedMax(subheaps)
               Node(y, H.merge(p1, p2))
         case None =>
           Empty()
@@ -90,14 +90,14 @@ object BootstrappedHeap {
 
     def merge[A](left: BootstrappedHeap[A, H], right: BootstrappedHeap[A, H]): BootstrappedHeap[A, H] = left.merge(right)
 
-    def findMin[A](heap: BootstrappedHeap[A, H]): Option[A] = heap.findMin
+    def findMax[A](heap: BootstrappedHeap[A, H]): Option[A] = heap.findMax
 
-    def deletedMin[A](heap: BootstrappedHeap[A, H]): BootstrappedHeap[A, H] = heap.deletedMin
+    def deletedMax[A](heap: BootstrappedHeap[A, H]): BootstrappedHeap[A, H] = heap.deletedMax
 
   }
 
   given [A: Ordering, H[_] : AsHeap]: Ordering[BootstrappedHeap[A, H]] with {
-    def compare(x: BootstrappedHeap[A, H], y: BootstrappedHeap[A, H]): Int = (x.findMin, y.findMin) match {
+    def compare(x: BootstrappedHeap[A, H], y: BootstrappedHeap[A, H]): Int = (x.findMax, y.findMax) match {
       case (Some(xv), Some(yv)) => summon[Ordering[A]].compare(xv, yv)
       case (None, None) => 0
       case (None, _) => -1

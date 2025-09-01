@@ -15,9 +15,9 @@ sealed trait PairingHeap[A: Ordering] {
 
   def merge(other: PairingHeap[A]): PairingHeap[A]
   
-  def findMin: Option[A]
+  def findMax: Option[A]
 
-  def deletedMin: PairingHeap[A]
+  def deletedMax: PairingHeap[A]
   
 }
 
@@ -32,10 +32,10 @@ object PairingHeap {
     def merge(other: PairingHeap[A]): PairingHeap[A] =
       other
     
-    def findMin: Option[A] =
+    def findMax: Option[A] =
       None
 
-    def deletedMin: PairingHeap[A] =
+    def deletedMax: PairingHeap[A] =
       this
 
   }
@@ -53,21 +53,21 @@ object PairingHeap {
       other match
         case Empty() => this
         case Node(otherValue, otherChildren) =>
-          if summon[Ordering[A]].lt(value, otherValue) then
+          if summon[Ordering[A]].gt(value, otherValue) then
             Node(value, other :: children)
           else
             Node(otherValue, this :: otherChildren)
     }
     
-    def findMin: Option[A] = {
+    def findMax: Option[A] = {
       Some(value)
     }
 
-    def deletedMin: PairingHeap[A] = {
+    def deletedMax: PairingHeap[A] = {
       mergePairs(children)
     }
 
-    def dequeuMin: (Option[A], PairingHeap[A]) = {
+    def dequeuMax: (Option[A], PairingHeap[A]) = {
       (Some(value), mergePairs(children))
     }
 
@@ -122,9 +122,9 @@ object PairingHeap {
 
     def merge[A](left: PairingHeap[A], right: PairingHeap[A]): PairingHeap[A] = left.merge(right)
     
-    def findMin[A](heap: PairingHeap[A]): Option[A] = heap.findMin
+    def findMax[A](heap: PairingHeap[A]): Option[A] = heap.findMax
 
-    def deletedMin[A](heap: PairingHeap[A]): PairingHeap[A] = heap.deletedMin
+    def deletedMax[A](heap: PairingHeap[A]): PairingHeap[A] = heap.deletedMax
 
   }
 

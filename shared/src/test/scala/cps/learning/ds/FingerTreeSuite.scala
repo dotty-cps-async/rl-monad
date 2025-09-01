@@ -12,7 +12,7 @@ class FingerTreeSuite extends FunSuite {
     def combine(x: IntWithMax, y: IntWithMax): IntWithMax = IntWithMax(math.max(x.value, y.value))
   }
 
-  given FingerTree.Measured[IntWithMax, IntWithMax] with {
+  given Measured[IntWithMax, IntWithMax] with {
     def measure(a: IntWithMax): IntWithMax = a
   }
 
@@ -32,7 +32,7 @@ class FingerTreeSuite extends FunSuite {
 
   test("2.dequeueMax should return element with maximum measure from two element tree") {
     val tree = FingerTree.Single[IntWithMax, IntWithMax](IntWithMax(3)).appended(IntWithMax(7))
-    
+
     val (max, remaining) = tree.dequeueMax
 
     assertEquals(max, IntWithMax(7))
@@ -149,7 +149,7 @@ class FingerTreeSuite extends FunSuite {
     def combine(x: IntWithSum, y: IntWithSum): IntWithSum = IntWithSum(x.value + y.value)
   }
 
-  given sumMeasured: FingerTree.Measured[IntWithSum, IntWithSum] with {
+  given sumMeasured: Measured[IntWithSum, IntWithSum] with {
     def measure(a: IntWithSum): IntWithSum = a
   }
 

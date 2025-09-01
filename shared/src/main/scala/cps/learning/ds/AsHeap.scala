@@ -19,17 +19,17 @@ trait AsHeap[H[_]] {
 
   def merge[A](left: H[A], right: H[A]): H[A]
   
-  def findMin[A](heap: H[A]): Option[A]
+  def findMax[A](heap: H[A]): Option[A]
 
-  def deletedMin[A](heap: H[A]): H[A]
+  def deletedMax[A](heap: H[A]): H[A]
 
-  def deueueMin[A](heap: H[A]): (Option[A], H[A]) = {
+  def deueueMax[A](heap: H[A]): (Option[A], H[A]) = {
     given Ordering[A] = elementOrdering(heap)
 
-    val min = findMin(heap)
-    min match {
-      case Some(value) => (min, deletedMin(heap))
-      case None => (min, empty)
+    val max = findMax(heap)
+    max match {
+      case Some(value) => (max, deletedMax(heap))
+      case None => (max, empty)
     }
   }
 

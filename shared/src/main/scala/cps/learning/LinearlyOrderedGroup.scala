@@ -100,7 +100,7 @@ object LinearlyOrderedGroup {
     def compare(x: Double, y: Double): Int = Math.abs(x).compareTo(Math.abs(y))
   }
 
-  given LinearlyOrderedMultiplicativeMonoid[Float] with {
+  given LinearlyOrderedGroup[Float] with {
 
     def combine(x: Float, y: Float): Float = Math.abs(x) * Math.abs(y)
 

@@ -91,7 +91,7 @@ object ScaledPairingHeap {
     x.merge(y)
   }
 
-  given scaledHeap[R: LinearlyOrderedGroup]: AsScaledHeap[ScaledPairingHeap, R] with {
+  given asScaledHeap[R: LinearlyOrderedGroup]: AsScaledHeap[ScaledPairingHeap, R] with {
 
     def elementMeasured[A](heap: ScaledPairingHeap[A, R]): Measured[A, R] =
       heap.elementMeasured

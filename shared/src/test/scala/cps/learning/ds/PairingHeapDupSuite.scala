@@ -14,18 +14,18 @@ class PairingHeapDupSuite extends FunSuite {
     val heap4 = heap3.insert(2)
 
 
-    val min1 = heap4.findMin
-    val remaining1 = heap4.deletedMin
+    val max1 = heap4.findMax
+    val remaining1 = heap4.deletedMax
 
-    val min2 = remaining1.findMin
-    val remaining2 = remaining1.deletedMin
+    val max2 = remaining1.findMax
+    val remaining2 = remaining1.deletedMax
 
-    val min3 = remaining2.findMin
-    val remaining3 = remaining2.deletedMin
+    val max3 = remaining2.findMax
+    val remaining3 = remaining2.deletedMax
 
-    assertEquals(min1, Some(1))
-    assertEquals(min2, Some(2))
-    assertEquals(min3, Some(3))
+    assertEquals(max1, Some(3))
+    assertEquals(max2, Some(2))
+    assertEquals(max3, Some(1))
     assert(remaining3.isEmpty)
   }
 
@@ -40,13 +40,13 @@ class PairingHeapDupSuite extends FunSuite {
 
     // Merge them all into one heap
     val merged = heap1.merge(heap2).merge(heap3).merge(heap4)
-  
-    // Now extract minimum - this should trigger mergePairs in deletedMin
-    val min = merged.findMin
-  
-    val afterDelete = merged.deletedMin
-  
-    val min2 = afterDelete.findMin
+
+    // Now extract maximul - this should trigger mergePairs in deletedMax
+    val max = merged.findMax
+
+    val afterDelete = merged.deletedMax
+
+    val min2 = afterDelete.findMax
   }
 
   test("PairingHeap - check for duplication using direct operations") {
@@ -55,14 +55,14 @@ class PairingHeapDupSuite extends FunSuite {
     // Create a more complex heap that might expose the duplication issue
     val values = List(5, 3, 7, 1, 9, 2, 8)
     val heap = values.foldLeft(PairingHeap.empty[Int])((h, v) => h.insert(v))
-    
+
     def extractAllDebug(h: PairingHeap[Int], extracted: List[Int] = Nil): List[Int] = {
       if h.isEmpty then {
-        extracted.reverse
+        extracted
       } else {
-        val min = h.findMin
-        val remaining = h.deletedMin
-        min match
+        val max = h.findMax
+        val remaining = h.deletedMax
+        max match
           case Some(v) => extractAllDebug(remaining, v :: extracted)
           case None => extracted.reverse
       }
