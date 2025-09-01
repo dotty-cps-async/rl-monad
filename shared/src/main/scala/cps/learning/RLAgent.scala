@@ -18,13 +18,12 @@ trait RLAgentBehavior[F[_] : CpsFloatOrderedLogicMonad, S, A] {
 }
 
 
-
 trait RLAgent[F[_] : CpsFloatOrderedLogicMonad, S, A] {
 
   type AgentState
 
   def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A]
-  
+
 }
 
 
@@ -57,12 +56,12 @@ class RLImmutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RL
 
   type Self = RLImmutableModelAgent[F, M, S, A]
 
-  
+
   def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
     reify[F] {
       val possibleActions = env.possibleActions[F](state)
       // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
-      val actionSet = fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
+      val actionSet = summon[CpsFloatOrderedLogicMonad[F]].fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
       model.selectOne(state, actionSet, mode)
     }
 
@@ -86,12 +85,12 @@ class RLImmutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RL
 
 class RLMutableModelAgent[F[_] : CpsFloatOrderedLogicMonad, M, S, A](model: RLMutableModel[S, A, Float]) extends RLMutableAgent[F, S, A] {
 
-  
+
   def chooseAction(env: RLEnvironment[S, A], state: S, mode: AgentRunningMode): F[A] =
     reify[F] {
       val possibleActions = env.possibleActions[F](state)
       // TODO: maybe in explore mode, do exploration with exloration rate more than epsilon-greedy
-      val actionSet = fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
+      val actionSet = summon[CpsFloatOrderedLogicMonad[F]].fromObserver(possibleActions.observeN(model.maxPossibleAction)).reflect
       model.selectOne(state, actionSet, mode)
     }
 
