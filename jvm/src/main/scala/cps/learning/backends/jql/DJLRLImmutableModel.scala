@@ -49,7 +49,13 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
       .optOptimizer(Optimizer.adam().build())
 
     val trainer = qNetwork.newTrainer(config)
-    trainer.initialize(new Shape(params.minBatchSize, params.observationSize))
+    val inputShape = new Shape(params.minBatchSize, params.observationSize)
+    trainer.initialize(inputShape)
+
+    // Initialize target network with the same shape using the trainer's manager
+    // so parameters are not released when we copy them later
+    val trainerManager = trainer.getManager
+    targetNetwork.getBlock.initialize(trainerManager, ai.djl.ndarray.types.DataType.FLOAT32, inputShape)
 
     val qPredictor = qNetwork.newPredictor(NDArrayTranslator)
     val targetPredictor = targetNetwork.newPredictor(NDArrayTranslator)
@@ -185,7 +191,10 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
       val sourceParam = entry.getValue
       val targetParam = targetParams.get(name)
       if (targetParam != null && sourceParam.getArray != null) {
-        targetParam.setArray(sourceParam.getArray.duplicate())
+        val sourceArray = sourceParam.getArray
+        val targetArray = targetParam.getArray
+        // Copy data from source to target by duplicating and copying values in-place
+        targetArray.set(sourceArray.toFloatArray)
       }
     }
   }
