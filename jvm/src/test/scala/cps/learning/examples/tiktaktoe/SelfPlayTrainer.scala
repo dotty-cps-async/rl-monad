@@ -2,6 +2,8 @@ package cps.learning.examples.tiktaktoe
 
 import scala.util.Random
 import ai.djl.ndarray.{NDArray, NDManager}
+import ai.djl.Device
+import ai.djl.engine.Engine
 
 import cps.*
 import cps.monads.{CpsIdentity, given}
@@ -166,8 +168,21 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using ndManager: NDManager) {
 
 object SelfPlayTrainer {
 
+  def detectDevice(): Device = {
+    val engine = Engine.getInstance()
+    val gpuCount = engine.getGpuCount()
+    if (gpuCount > 0) {
+      println(s"GPU detected: $gpuCount GPU(s) available, using GPU 0")
+      Device.gpu(0)
+    } else {
+      println("No GPU detected, using CPU")
+      Device.cpu()
+    }
+  }
+
   def run(config: SelfPlayConfig = SelfPlayConfig()): TrainingMetrics = {
-    val ndManager = NDManager.newBaseManager()
+    val device = detectDevice()
+    val ndManager = NDManager.newBaseManager(device)
     try {
       given NDManager = ndManager
       val trainer = new SelfPlayTrainer(config)
