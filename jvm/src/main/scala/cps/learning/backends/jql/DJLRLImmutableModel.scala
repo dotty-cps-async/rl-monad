@@ -16,24 +16,29 @@ import cps.learning.AgentRunningMode.Explore
 import scala.util.Random
 
 
-case class DJRLModelState[S, A](
+case class DJRLModelState[O, A](
                                  qNetwork: Model,
                                  qNetworkTrainer: Trainer,
                                  qNetworkPredictor: Predictor[NDArray, NDArray],
                                  targetNetwork: Model,
                                  targetNetworkPredictor: Predictor[NDArray, NDArray],
-                                 replayBuffer: Vector[Experience[S, A]],
+                                 replayBuffer: Vector[Experience[O, A]],
                                  nStepsAfterTraining: Int,
                                  totalTrainingSteps: Int,
                                )
 
 /**
+ * Type alias for TensorRepresentation with NDArray tensor type
+ */
+type NDArrayTensorRepresentation[A] = TensorRepresentation[A] { type Tensor = NDArray }
+
+/**
  * Local model, which is running locally via DJL.
  */
-class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepresentation, A: IntRepresentation](params: DJLRLModelParams) extends RLModelControl[F, S, A, Float, DJRLModelState[S, A]] {
+class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRepresentation](params: DJLRLModelParams)(using obsRepr: TensorRepresentation[O] { type Tensor = NDArray }) extends RLModelControl[F, S, O, A, Float, DJRLModelState[O, A]] {
 
 
-  override def initialModel: DJRLModelState[S, A] = {
+  override def initialModel: DJRLModelState[O, A] = {
     val qNetwork = Model.newInstance(s"${params.name}-Q")
     qNetwork.setBlock(params.qBuilder())
 
@@ -44,7 +49,7 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
       .optOptimizer(Optimizer.adam().build())
 
     val trainer = qNetwork.newTrainer(config)
-    trainer.initialize(new Shape(params.minBatchSize, params.stateSize))
+    trainer.initialize(new Shape(params.minBatchSize, params.observationSize))
 
     val qPredictor = qNetwork.newPredictor(NDArrayTranslator)
     val targetPredictor = targetNetwork.newPredictor(NDArrayTranslator)
@@ -61,10 +66,10 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
     )
   }
 
-  override def maxPossibleActons(model: DJRLModelState[S, A]): Int = params.actionSize
+  override def maxPossibleActions(model: DJRLModelState[O, A]): Int = params.actionSize
 
 
-  override def rateActions(modelState: DJRLModelState[S, A], envState: S, validActions: IndexedSeq[A], mode: AgentRunningMode): F[A] = {
+  override def rateActions(modelState: DJRLModelState[O, A], observation: O, validActions: IndexedSeq[A], mode: AgentRunningMode): F[A] = {
     val scored =
       if (mode == Explore && params.random.nextFloat < params.epsilon) then
         // Explore: random valid move
@@ -74,7 +79,7 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
         }
       else
         // Exploit: choose best action
-        val input = summon[NDArrayRepresentation[S]].toNDArray(envState)
+        val input = obsRepr.toTensor(observation)
         val qValues = modelState.qNetworkPredictor.predict(input)
 
         validActions.zipWithIndex.map { (action, actionIndex) =>
@@ -90,8 +95,8 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
 
   }
 
-  override def trainCase(modelState: DJRLModelState[S, A], envState: S, nextState: S, action: A, reward: Float, finish: Boolean): F[DJRLModelState[S, A]] = {
-    val experience = Experience(envState, action, nextState, reward, finish)
+  override def trainCase(modelState: DJRLModelState[O, A], observation: O, nextObservation: O, action: A, reward: Float, finish: Boolean): F[DJRLModelState[O, A]] = {
+    val experience = Experience(observation, action, nextObservation, reward, finish)
     val newReplayBuffer = (modelState.replayBuffer :+ experience).takeRight(ReplayBuffer.DEFAULT_MAX_SIZE)
     val nextModelState = if (newReplayBuffer.length >= params.minBatchSize && modelState.nStepsAfterTraining >= params.nStepsBetweenTraining) {
       trainBatch(modelState, newReplayBuffer)
@@ -101,43 +106,42 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
     summon[CpsScoredLogicMonad[F, Float]].pure(nextModelState)
   }
 
-  def trainBatch(modelState: DJRLModelState[S, A], newReplayBuffer: Vector[Experience[S, A]]): DJRLModelState[S, A] = {
+  def trainBatch(modelState: DJRLModelState[O, A], newReplayBuffer: Vector[Experience[O, A]]): DJRLModelState[O, A] = {
     val sample = takeSample(newReplayBuffer, params.minBatchSize, params.random)
-    val stateRepr = summon[NDArrayRepresentation[S]]
     val actionRepr = summon[IntRepresentation[A]]
     val manager = modelState.qNetworkTrainer.getManager
 
     // Build batch arrays
-    val statesData = new Array[Float](params.minBatchSize * params.stateSize)
-    val nextStatesData = new Array[Float](params.minBatchSize * params.stateSize)
+    val obsData = new Array[Float](params.minBatchSize * params.observationSize)
+    val nextObsData = new Array[Float](params.minBatchSize * params.observationSize)
     val rewards = new Array[Float](params.minBatchSize)
     val actions = new Array[Int](params.minBatchSize)
     val dones = new Array[Float](params.minBatchSize)
 
     for (i <- sample.indices) {
       val exp = sample(i)
-      val stateArray = stateRepr.toNDArray(exp.state).toFloatArray
-      val nextStateArray = stateRepr.toNDArray(exp.nextState).toFloatArray
-      System.arraycopy(stateArray, 0, statesData, i * params.stateSize, params.stateSize)
-      System.arraycopy(nextStateArray, 0, nextStatesData, i * params.stateSize, params.stateSize)
+      val obsArray = obsRepr.toTensor(exp.observation).toFloatArray
+      val nextObsArray = obsRepr.toTensor(exp.nextObservation).toFloatArray
+      System.arraycopy(obsArray, 0, obsData, i * params.observationSize, params.observationSize)
+      System.arraycopy(nextObsArray, 0, nextObsData, i * params.observationSize, params.observationSize)
       rewards(i) = exp.reward
       actions(i) = actionRepr.toInt(exp.action)
       dones(i) = if (exp.done) 1.0f else 0.0f
     }
 
     // Create NDArrays
-    val statesND = manager.create(statesData, new Shape(params.minBatchSize, params.stateSize))
-    val nextStatesND = manager.create(nextStatesData, new Shape(params.minBatchSize, params.stateSize))
+    val obsND = manager.create(obsData, new Shape(params.minBatchSize, params.observationSize))
+    val nextObsND = manager.create(nextObsData, new Shape(params.minBatchSize, params.observationSize))
     val rewardsND = manager.create(rewards)
     val donesND = manager.create(dones)
 
-    // Compute target Q values: reward + gamma * max(Q_target(nextState)) * (1 - done)
-    val nextQValues = modelState.targetNetworkPredictor.predict(nextStatesND)
+    // Compute target Q values: reward + gamma * max(Q_target(nextObs)) * (1 - done)
+    val nextQValues = modelState.targetNetworkPredictor.predict(nextObsND)
     val maxNextQ = nextQValues.max(Array(1))
     val targets = rewardsND.add(maxNextQ.mul(params.gamma).mul(donesND.neg().add(1.0f)))
 
     // Get current Q values and update only the selected actions
-    val currentQValues = modelState.qNetworkPredictor.predict(statesND)
+    val currentQValues = modelState.qNetworkPredictor.predict(obsND)
     val targetQValues = currentQValues.duplicate()
 
     for (i <- 0 until params.minBatchSize) {
@@ -147,7 +151,7 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S: NDArrayRepre
     // Train
     val gc = modelState.qNetworkTrainer.newGradientCollector()
     try {
-      val predictions = modelState.qNetworkTrainer.forward(new NDList(statesND)).singletonOrThrow()
+      val predictions = modelState.qNetworkTrainer.forward(new NDList(obsND)).singletonOrThrow()
       val loss = Loss.l2Loss().evaluate(new NDList(targetQValues), new NDList(predictions))
       gc.backward(loss)
       modelState.qNetworkTrainer.step()

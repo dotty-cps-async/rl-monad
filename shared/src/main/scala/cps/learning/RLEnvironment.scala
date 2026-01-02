@@ -4,9 +4,15 @@ package cps.learning
 /**
  * Environment are defined by
  * - State S
+ * - Observation O (what the neural network sees)
  * - Action A
  * */
-trait RLEnvironment[S, A] {
+trait RLEnvironment[S, O, A] {
+
+  /**
+   * Convert state to observation for neural network input
+   */
+  def observe(state: S): O
 
   /**
    * return initial state

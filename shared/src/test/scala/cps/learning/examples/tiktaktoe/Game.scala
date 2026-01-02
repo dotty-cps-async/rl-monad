@@ -6,7 +6,9 @@ import cps.monads.logic.{*, given}
 
 case class GameState(board: Board, nextPlayer: Int)
 
-class TikTakToeGame(boardSize: Int, n: Int) extends RLEnvironment[GameState, Move] {
+class TikTakToeGame(boardSize: Int, n: Int) extends RLEnvironment[GameState, Board, Move] {
+
+  def observe(state: GameState): Board = state.board
 
   def initState: GameState = GameState(Board.empty(boardSize), 1)
 
