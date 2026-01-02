@@ -1,0 +1,10 @@
+docs/articles
+docs/brainstorm
+
+# SBT
+target/
+project/target/
+project/project/
+.bloop/
+.bsp/
+.metals/
