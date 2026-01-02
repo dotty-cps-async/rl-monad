@@ -52,28 +52,6 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using ndManager: NDManager) {
   // Game environment
   val game = new TikTakToeGame(config.boardSize, config.winLength)
 
-  // Tensor representation for Board -> NDArray
-  given boardRepr: TensorRepresentation[Board] with {
-    type Tensor = NDArray
-    def toTensor(b: Board): NDArray = {
-      val arr = new Array[Float](config.boardSize * config.boardSize)
-      for (i <- 0 until config.boardSize; j <- 0 until config.boardSize) {
-        arr(i * config.boardSize + j) = b.getOrElse((i, j), 0).toFloat
-      }
-      ndManager.create(arr)
-    }
-    def fromTensor(t: NDArray): Option[Board] = {
-      val arr = t.toFloatArray
-      val size = math.sqrt(arr.length).toInt
-      var board = Board.empty(size)
-      for (i <- 0 until size; j <- 0 until size) {
-        val v = arr(i * size + j).toInt
-        if (v != 0) board = board.update(i, j, v)
-      }
-      Some(board)
-    }
-  }
-
   // Int representation for Move
   given moveRepr: IntRepresentation[Move] = MoveIntRepresentation(config.boardSize)
 
