@@ -47,8 +47,7 @@ object ShortestPath {
 
     def pathFrom(state: SearchState[N], current: N, currentCost: Float): F[SearchState[N]] = {
       F.multiScore(
-        db.neighbords(current).map(e => (-(currentCost + e.cost) -> e)).toMap
-          .map { case (score, e) => (score, () => F.pure(e)) }
+        db.neighbords(current).map(e => (-(currentCost + e.cost), () => F.pure(e)))
       ).foldLeftWhileM(state)(state => !state.marks.contains(end)) {
         case (state, edge@Edge(_, to, _)) =>
           val (marks, toCost) = state.marks.addEdge(edge)

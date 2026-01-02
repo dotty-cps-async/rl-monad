@@ -1,12 +1,12 @@
 
 
-val dottyCpsAsyncVersion = "1.1.3-SNAPSHOT"
+val dottyCpsAsyncVersion = "1.2.0"
 
 
 lazy val rlLogic = crossProject(JSPlatform, JVMPlatform, NativePlatform)
   .in(file("."))
   .settings(
-    scalaVersion := "3.3.6",
+    scalaVersion := "3.3.7",
     name := "rl-logic",
     libraryDependencies += "io.github.dotty-cps-async" %%% "dotty-cps-async" % dottyCpsAsyncVersion,
     libraryDependencies += "io.github.dotty-cps-async" %%% "dotty-cps-async-logic" % dottyCpsAsyncVersion,

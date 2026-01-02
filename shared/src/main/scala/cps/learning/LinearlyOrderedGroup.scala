@@ -17,12 +17,12 @@ trait LinearlyOrderedMultiplicativeMonoid[A] extends Ordering[A] {
   def minPositiveValue: A
 
   def maxPositiveValue: A
-  
-  def maxOf(values: A*): A = 
+
+  def maxOf(values: A*): A =
     if values.isEmpty then
       minPositiveValue
     else
-      values.reduce((x,y) => if compare(x,y) >= 0 then x else y)
+      values.reduce((x, y) => if compare(x, y) >= 0 then x else y)
 
 }
 
@@ -81,7 +81,22 @@ trait LinearlyOrderedGroup[A] extends LinearlyOrderedMultiplicativeMonoid[A] {
 
 object LinearlyOrderedGroup {
 
-  given LinearlyOrderedGroup[Double] with {
+  given LinearlyOrderedGroup[Float] = summon[LinearlyOrderedRing[Float]]
+
+
+}
+
+trait LinearlyOrderedRing[A] extends LinearlyOrderedGroup[A] {
+
+  def add(x: A, y: A): A
+
+  def negate(x: A): A = add(zero, x)
+
+}
+
+object LinearlyOrderedRing {
+
+  given LinearlyOrderedRing[Double] with {
 
     def combine(x: Double, y: Double): Double = Math.abs(x) * Math.abs(y)
 
@@ -98,9 +113,14 @@ object LinearlyOrderedGroup {
     def maxPositiveValue: Double = Double.PositiveInfinity
 
     def compare(x: Double, y: Double): Int = Math.abs(x).compareTo(Math.abs(y))
+
+    def add(x: Double, y: Double): Double = x + y
+
+    override def negate(x: Double): Double = -x
+
   }
 
-  given LinearlyOrderedGroup[Float] with {
+  given LinearlyOrderedRing[Float] with {
 
     def combine(x: Float, y: Float): Float = Math.abs(x) * Math.abs(y)
 
@@ -117,7 +137,11 @@ object LinearlyOrderedGroup {
     def maxPositiveValue: Float = Float.PositiveInfinity
 
     def compare(x: Float, y: Float): Int = Math.abs(x).compareTo(Math.abs(y))
+
+    def add(x: Float, y: Float): Float = x + y
+
+    override def negate(x: Float): Float = -x
   }
 
-}
 
+}

@@ -26,7 +26,7 @@ trait CpsScoredLogicMonad[F[_], R: LinearlyOrderedGroup] extends CpsLogicMonad[F
   /**
    * Create the  branch of the computation according to the scopre.
    */
-  def multiScore[A](m: Map[R, () => F[A]]): F[A] =
+  def multiScore[A](m: Seq[(R, () => F[A])]): F[A] =
     m.foldLeft(empty[A]) { case (acc, (score, next)) =>
       scoredMplus(acc, score, next())
     }
@@ -62,8 +62,7 @@ object CpsScoredLogicMonad {
     type Context = C
     type Observer[A] = O[A]
   }
-  
-  
+
 
 }
 
