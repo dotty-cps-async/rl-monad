@@ -156,6 +156,9 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using ndManager: NDManager) {
       }
     }
 
+    // Close model resources
+    model.close()
+
     TrainingMetrics(
       episode = config.numEpisodes,
       player1Wins = player1Wins,
