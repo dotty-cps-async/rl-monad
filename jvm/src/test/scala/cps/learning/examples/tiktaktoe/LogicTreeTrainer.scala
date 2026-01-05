@@ -11,6 +11,7 @@ import cps.*
 import cps.monads.{CpsIdentity, given}
 import cps.learning.*
 import cps.learning.backends.jql.*
+import cps.learning.backends.jql.given  // TensorScope[NDManager]
 import cps.learning.ScoredLogicStreamT
 import cps.learning.ScoredLogicStreamT.given
 import cps.learning.ds.LogicalSearchPolicy.given
@@ -45,7 +46,7 @@ case class ActiveGame(
  * - When slots are available: take top N actions, spawn N-1 new games
  * - When no slots available: take only the first (best) action
  */
-class LogicTreeTrainer(config: LogicTreeConfig)(using ndManager: NDManager) {
+class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
 
   type LogicF[A] = ScoredLogicStreamT[CpsIdentity, A, Float]
   type StepResult = RLAgentStepResult[GameState, DJRLModelState[Board, Move]]
@@ -53,6 +54,8 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using ndManager: NDManager) {
   val game = new TikTakToeGame(config.boardSize, config.winLength)
 
   given moveRepr: IntRepresentation[Move] = MoveIntRepresentation(config.boardSize)
+  given boardRepr: BatchableTensorRepresentation[Board, NDManager] { type Tensor = NDArray } =
+    BoardTensorRepresentation(config.boardSize)
 
   val modelParams = DJLRLModelParams(
     name = "tiktaktoe-logic-tree",
@@ -295,13 +298,10 @@ object LogicTreeTrainer {
 
   def run(config: LogicTreeConfig = LogicTreeConfig()): TrainingMetrics = {
     val device = detectDevice()
-    val ndManager = NDManager.newBaseManager(device)
-    try {
-      given NDManager = ndManager
+    given TensorPlatform { type Scope = NDManager } = DJL.withDevice(device)
+    TensorScope.withGlobalScope[NDManager, TrainingMetrics] { rootScope =>
       val trainer = new LogicTreeTrainer(config)
       trainer.train()
-    } finally {
-      ndManager.close()
     }
   }
 

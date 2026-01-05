@@ -9,6 +9,7 @@ import cps.*
 import cps.monads.{CpsIdentity, given}
 import cps.learning.*
 import cps.learning.backends.jql.*
+import cps.learning.backends.jql.given  // TensorScope[NDManager]
 import cps.learning.ScoredLogicStreamT
 import cps.learning.ScoredLogicStreamT.given
 import cps.learning.ds.LogicalSearchPolicy.given
@@ -46,7 +47,7 @@ case class TrainingMetrics(
 /**
  * Self-play trainer using the monadic RL interfaces.
  */
-class SelfPlayTrainer(config: SelfPlayConfig)(using ndManager: NDManager) {
+class SelfPlayTrainer(config: SelfPlayConfig)(using TensorScope[NDManager]) {
 
   // Use CpsIdentity as the base monad - simplest synchronous execution
   type LogicF[A] = ScoredLogicStreamT[CpsIdentity, A, Float]
@@ -56,6 +57,10 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using ndManager: NDManager) {
 
   // Int representation for Move
   given moveRepr: IntRepresentation[Move] = MoveIntRepresentation(config.boardSize)
+
+  // Board tensor representation with batching support
+  given boardRepr: BatchableTensorRepresentation[Board, NDManager] { type Tensor = NDArray } =
+    BoardTensorRepresentation(config.boardSize)
 
   // Model parameters
   val modelParams = DJLRLModelParams(
@@ -185,13 +190,10 @@ object SelfPlayTrainer {
 
   def run(config: SelfPlayConfig = SelfPlayConfig()): TrainingMetrics = {
     val device = detectDevice()
-    val ndManager = NDManager.newBaseManager(device)
-    try {
-      given NDManager = ndManager
+    given TensorPlatform { type Scope = NDManager } = DJL.withDevice(device)
+    TensorScope.withGlobalScope[NDManager, TrainingMetrics] { rootScope =>
       val trainer = new SelfPlayTrainer(config)
       trainer.train()
-    } finally {
-      ndManager.close()
     }
   }
 

@@ -11,6 +11,7 @@ import cps.monads.{CpsIdentity, given}
 import cps.monads.logic.{*, given}
 import cps.learning.*
 import cps.learning.backends.jql.*
+import cps.learning.backends.jql.given  // TensorScope[NDManager]
 import cps.learning.ScoredLogicStreamT
 import cps.learning.ScoredLogicStreamT.given
 import cps.learning.ds.LogicalSearchPolicy.given
@@ -70,13 +71,15 @@ class TikTakToeMiniMaxAgent[F[_]: CpsScoredLogicMonad.Curry[Float]](
 /**
  * MiniMax trainer for TikTakToe using symmetric self-play.
  */
-class MiniMaxTrainer(config: MiniMaxConfig)(using ndManager: NDManager) {
+class MiniMaxTrainer(config: MiniMaxConfig)(using TensorScope[NDManager]) {
 
   type LogicF[A] = ScoredLogicStreamT[CpsIdentity, A, Float]
 
   val game = new TikTakToeGame(config.boardSize, config.winLength)
 
   given moveRepr: IntRepresentation[Move] = MoveIntRepresentation(config.boardSize)
+  given boardRepr: BatchableTensorRepresentation[Board, NDManager] { type Tensor = ai.djl.ndarray.NDArray } =
+    BoardTensorRepresentation(config.boardSize)
 
   val modelParams = DJLRLModelParams(
     name = "tiktaktoe-minimax",
@@ -236,13 +239,11 @@ object MiniMaxTrainer {
 
   def run(config: MiniMaxConfig = MiniMaxConfig()): TrainingMetrics = {
     val device = SelfPlayTrainer.detectDevice()
-    val ndManager = NDManager.newBaseManager(device)
-    try {
-      given NDManager = ndManager
+    given TensorPlatform { type Scope = NDManager } = DJL.withDevice(device)
+    TensorScope.withGlobalScope[NDManager, TrainingMetrics] { rootScope =>
+      // TensorScope[NDManager] is in scope from the import
       val trainer = new MiniMaxTrainer(config)
       trainer.train()
-    } finally {
-      ndManager.close()
     }
   }
 
