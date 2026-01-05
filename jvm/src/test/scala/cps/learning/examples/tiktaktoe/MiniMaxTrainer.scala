@@ -210,6 +210,11 @@ class MiniMaxTrainer(config: MiniMaxConfig)(using ndManager: NDManager) {
       if (episode % config.saveEvery == 0) {
         config.modelPath.foreach(path => saveModel(model, path))
       }
+
+      // Force GC every 1000 episodes to test if memory is recoverable
+      if (episode % 1000 == 0) {
+        System.gc()
+      }
     }
 
     // Save final model

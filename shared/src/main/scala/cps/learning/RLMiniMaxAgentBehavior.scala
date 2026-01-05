@@ -114,20 +114,20 @@ trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R:
                 rlMonad.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), gain)
               else if recursionCount > 1 then
                 // Self-recursive: same agent plays opponent's turn
-                // Take only the best result from opponent's exploration using fsplit (observer monad)
+                // Use first() to get best result without creating continuation structures
                 val opponentResultF = performVirtualStep(env, newState, trainedState, recursionCount - 1)
                 val m = rlMonad
                 val obs = m.observerCpsMonad
                 m.flattenObserver(
-                  obs.flatMap(m.fsplit(opponentResultF)) {
-                    case Some((scala.util.Success(opponentResult), _)) =>
+                  obs.map(m.first(opponentResultF)) {
+                    case Some(scala.util.Success(opponentResult)) =>
                       // Got opponent's best move - return our action with updated state
-                      obs.pure(m.scoredPure((action, RLAgentStepResult.Continued(newState, opponentResult.agentBehaviorState)), gain))
-                    case Some((scala.util.Failure(e), _)) =>
-                      obs.pure(m.error[(A, RLAgentStepResult[S, AgentBehaviorState])](e))
+                      m.scoredPure((action, RLAgentStepResult.Continued(newState, opponentResult.agentBehaviorState)), gain)
+                    case Some(scala.util.Failure(e)) =>
+                      m.error[(A, RLAgentStepResult[S, AgentBehaviorState])](e)
                     case None =>
                       // No valid opponent move - opponent loses, we win
-                      obs.pure(m.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), ordering.maxPositiveValue))
+                      m.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), ordering.maxPositiveValue)
                   }
                 )
               else

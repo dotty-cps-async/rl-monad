@@ -33,6 +33,12 @@ sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup :
 
   def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R]
 
+  /**
+   * Get only the first/best result without creating continuation structures.
+   * This is more memory-efficient than fsplit when you don't need the rest of the stream.
+   */
+  def first: F[Option[Try[A]]]
+
 }
 
 object ScoredLogicStreamT {
@@ -79,6 +85,9 @@ object ScoredLogicStreamT {
     override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
       Pure(None, R.one)
     }
+
+    override def first: F[Option[Try[A]]] =
+      summon[CpsTryMonad[F]].pure(None)
 
   }
 
@@ -132,6 +141,9 @@ object ScoredLogicStreamT {
       Pure(Some((Success(value), Empty())), R.one |*| score)
     }
 
+    override def first: F[Option[Try[A]]] =
+      summon[CpsTryMonad[F]].pure(Some(Success(value)))
+
   }
 
   case class Error[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](error: Throwable) extends ScoredLogicStreamT[F, A, R] {
@@ -162,6 +174,9 @@ object ScoredLogicStreamT {
     override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
       Pure(Some((Failure(error), Empty())), R.one |*| maxScore)
     }
+
+    override def first: F[Option[Try[A]]] =
+      summon[CpsTryMonad[F]].pure(Some(Failure(error)))
 
   }
 
@@ -201,6 +216,9 @@ object ScoredLogicStreamT {
         s.msplit
       }, score)
     }
+
+    override def first: F[Option[Try[A]]] =
+      summon[CpsTryMonad[F]].flatMap(waited)(_.first)
 
   }
 
@@ -247,6 +265,14 @@ object ScoredLogicStreamT {
     override def msplit: ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] = {
       Suspend(() => thunk().msplit, score)
     }
+
+    override def first: F[Option[Try[A]]] =
+      try {
+        thunk().first
+      } catch {
+        case NonFatal(e) =>
+          summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+      }
 
   }
 
@@ -420,6 +446,58 @@ object ScoredLogicStreamT {
       WaitF(fStream, R.one)
     }
 
+    /**
+     * Get only the first/best result without creating continuation structures.
+     * Unlike fsplit, this doesn't merge remaining streams - it just discards them.
+     */
+    override def first: F[Option[Try[A]]] = {
+      def getFromResultPool: F[Option[Try[A]]] = {
+        resultPool.dequeue match
+          case (Some(frs), _) =>
+            summon[CpsTryMonad[F]].pure(Some(Success(frs.value)))
+          case (None, _) =>
+            summon[CpsTryMonad[F]].pure(None)
+      }
+
+      def getFromStream(backupFromResultPool: Boolean): F[Option[Try[A]]] = {
+        val (optFrs, _) = asPQ.dequeue(streams)  // discard tail
+        optFrs match
+          case None =>
+            if backupFromResultPool then getFromResultPool
+            else summon[CpsTryMonad[F]].pure(None)
+          case Some(frs) =>
+            frs match
+              case Empty() =>
+                // Recursively try next element - but we've discarded the tail, so just return None
+                summon[CpsTryMonad[F]].pure(None)
+              case p@Pure(value, _) =>
+                summon[CpsTryMonad[F]].pure(Some(Success(value)))
+              case err@Error(e) =>
+                summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+              case w@WaitF(waited, _) =>
+                summon[CpsTryMonad[F]].flatMap(waited)(_.first)
+              case s@Suspend(thunk, _) =>
+                try thunk().first
+                catch case NonFatal(e) => summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+              case q@Queue(_, _) =>
+                q.first
+      }
+
+      resultPool.findMaxPriority match {
+        case Some(resultPoolPriority) =>
+          asPQ.findMaxPriority(streams) match {
+            case Some(streamsPriority) =>
+              if summon[Ordering[R]].gteq(resultPoolPriority, streamsPriority) then
+                getFromResultPool
+              else
+                getFromStream(backupFromResultPool = true)
+            case None =>
+              getFromResultPool
+          }
+        case None =>
+          getFromStream(backupFromResultPool = false)
+      }
+    }
 
   }
 
@@ -475,10 +553,9 @@ object ScoredLogicStreamT {
     override def msplit[A](c: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, Option[(Try[A], ScoredLogicStreamT[F, A, R])], R] =
       c.msplit
 
-    //this is implemented in the next versions of logic, 
-    //TODO: remove after dotty-cps-async logic 1.1.3 release
-    
-    
+    override def first[A](fa: ScoredLogicStreamT[F, A, R]): F[Option[Try[A]]] =
+      fa.first
+
   }
 
 

@@ -30,6 +30,12 @@ trait CpsScoredLogicMonad[F[_], R: LinearlyOrderedGroup] extends CpsLogicMonad[F
     m.foldLeft(empty[A]) { case (acc, (score, next)) =>
       scoredMplus(acc, score, next())
     }
+
+  /**
+   * Get the first/best result without creating continuation structures.
+   * More memory-efficient than fsplit when you don't need the rest of the stream.
+   */
+  def first[A](fa: F[A]): Observer[Option[scala.util.Try[A]]]
 }
 
 
