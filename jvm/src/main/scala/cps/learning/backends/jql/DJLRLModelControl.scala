@@ -99,18 +99,22 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
         }
       else
         // Exploit: choose best action based on Q-values
-        val input = obsRepr.toTensor(observation)
-        val qValues = modelState.qNetworkPredictor.predict(input)
+        // Use subManager to ensure all tensors are properly cleaned up
+        val trainerManager = modelState.qNetworkTrainer.getManager
+        val subManager = trainerManager.newSubManager()
         try {
-          // Extract values before closing tensors
+          val input = obsRepr.toTensor(observation)
+          input.attach(subManager)  // Attach to subManager for cleanup
+          val qValues = modelState.qNetworkPredictor.predict(input)
+          qValues.attach(subManager)  // Attach to subManager for cleanup
+          // Extract values before closing subManager
           validActions.zipWithIndex.map { (action, actionIndex) =>
             val value = qValues.getFloat(actionIndex)
             (value, action)
           }
         } finally {
-          // Close tensors to prevent memory leak
-          qValues.close()
-          input.close()
+          // Close subManager to free all attached tensors
+          subManager.close()
         }
 
     val retval = summon[CpsScoredLogicMonad[F,Float]].multiScore(scored.map {
@@ -152,16 +156,13 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
         for (i <- sample.indices) {
           val exp = sample(i)
           val obsTensor = obsRepr.toTensor(exp.observation)
+          obsTensor.attach(subManager)  // Attach to subManager for cleanup
           val nextObsTensor = obsRepr.toTensor(exp.nextObservation)
-          try {
-            val obsArray = obsTensor.toFloatArray
-            val nextObsArray = nextObsTensor.toFloatArray
-            System.arraycopy(obsArray, 0, obsData, i * params.observationSize, params.observationSize)
-            System.arraycopy(nextObsArray, 0, nextObsData, i * params.observationSize, params.observationSize)
-          } finally {
-            obsTensor.close()
-            nextObsTensor.close()
-          }
+          nextObsTensor.attach(subManager)  // Attach to subManager for cleanup
+          val obsArray = obsTensor.toFloatArray
+          val nextObsArray = nextObsTensor.toFloatArray
+          System.arraycopy(obsArray, 0, obsData, i * params.observationSize, params.observationSize)
+          System.arraycopy(nextObsArray, 0, nextObsData, i * params.observationSize, params.observationSize)
           rewards(i) = exp.reward
           actions(i) = actionRepr.toInt(exp.action)
           dones(i) = if (exp.done) 1.0f else 0.0f
