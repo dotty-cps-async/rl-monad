@@ -23,11 +23,11 @@ tensor.attach(subManager)  // Easy to forget!
 
 ### Design Decision: Type Classes
 
-Simple type class design:
-- `TensorScope[S]` - type class for scope operations
+Type classes allow platform-specific implementations without inheritance:
+- `TensorScope[S]` - type class for scope lifecycle operations (create sub-scope, close)
 - `TensorRepresentation[A, S: TensorScope]` - type class for tensor conversion, context bound ensures `S` has `TensorScope`
-- Platform defines type alias, instances found via implicit search
-- Extension methods for clean syntax
+- `TensorPlatform` - trait for platform abstraction (provides root scope type and factory)
+- Instances found via implicit search, extension methods for clean syntax
 
 ### Core Abstractions
 
@@ -60,6 +60,31 @@ trait TensorRepresentation[A, S: TensorScope] {
   def tensorShape(a: A): Seq[Int]
 }
 
+/**
+ * Platform abstraction - defines scope type and provides root scope.
+ * TensorScope instance is found via implicit search, not stored here.
+ */
+trait TensorPlatform {
+  type Scope
+  def rootScope(): Scope
+}
+
+// Convenience methods in TensorScope companion
+object TensorScope {
+  /** Get root scope from implicit platform */
+  def global[S](using p: TensorPlatform { type Scope = S }): S =
+    p.rootScope()
+
+  /** Execute in a managed global scope */
+  def withGlobalScope[S: TensorScope, A](f: S => A)(
+    using p: TensorPlatform { type Scope = S }
+  ): A = {
+    val root = p.rootScope()
+    try summon[TensorScope[S]].withScope(root)(f)
+    finally summon[TensorScope[S]].close(root)
+  }
+}
+
 // Extension methods for cleaner syntax
 extension [S: TensorScope](scope: S)
   def withSubScope[A](f: S => A): A = summon[TensorScope[S]].withScope(scope)(f)
@@ -76,9 +101,10 @@ extension [A, S: TensorScope](a: A)(using repr: TensorRepresentation[A, S])
 import ai.djl.ndarray.{NDArray, NDManager}
 import ai.djl.ndarray.types.Shape
 
-// Platform defines type alias
-object DJL {
+// Platform implementation
+object DJL extends TensorPlatform {
   type Scope = NDManager
+  def rootScope(): NDManager = NDManager.newBaseManager(Device.gpu())
 }
 
 // Type class instances - found via implicit search
@@ -111,17 +137,27 @@ given TensorRepresentation[Board, NDManager] with {
 ### Usage
 
 ```scala
-// Clean syntax with extension methods
-val root = NDManager.newBaseManager()
+// Using platform to get root scope
+given TensorPlatform = DJL
+
+val root = TensorScope.global
 root.withSubScope { scope =>
   val tensor = board.toTensor(scope)
   // ... use tensor
 }
 // scope closed, tensors freed
 
-// Generic over scope type
-def train[S: TensorScope](root: S)(using TensorRepresentation[Board, S]) = {
-  root.withSubScope { scope =>
+// Or use convenience method for fully managed scope
+TensorScope.withGlobalScope { scope =>
+  board.toTensor(scope)
+}
+
+// Platform-generic code
+def train[S: TensorScope](using
+  p: TensorPlatform { type Scope = S },
+  repr: TensorRepresentation[Board, S]
+): Unit = {
+  TensorScope.withGlobalScope { scope =>
     board.toTensor(scope)
   }
 }
@@ -271,18 +307,28 @@ class DJLRLModelControl[F[_], S, O, A](params: DJLRLModelParams)(
 }
 ```
 
-## Open Questions
+## Resolved Questions
 
-1. How to handle tensors that need to outlive a scope (e.g., model parameters)?
+### Q1: How to handle tensors that need to outlive a scope (e.g., model parameters)?
 
-2. Should we provide a `TensorScope` convenience wrapper that combines lifecycle + representation?
+**Answer**: Use the root scope from `TensorPlatform`. Model parameters are allocated in the root scope which outlives sub-scopes used for training data:
 
 ```scala
-class TensorScope[A, Ctx](lifecycle: TensorLifecycleManager[Ctx], repr: TensorRepresentation[A, Ctx]) {
-  def withTensors[R](parent: Ctx)(values: A*)(f: Seq[repr.Tensor] => R): R = {
-    lifecycle.withScope(parent) { scope =>
-      f(values.map(v => repr.toTensor(v, scope)))
-    }
-  }
+given platform: TensorPlatform = DJL
+
+// Model parameters live in root scope
+val rootScope = TensorScope.global
+val modelWeights = createModel(rootScope)  // Long-lived
+
+// Training data uses sub-scopes that get cleaned up
+rootScope.withSubScope { batchScope =>
+  val batchTensor = data.toTensor(batchScope)  // Cleaned up after batch
+  train(modelWeights, batchTensor)
 }
+// batchScope closed, training tensors freed
+// modelWeights still alive in rootScope
 ```
+
+## Open Questions
+
+None currently - extension methods provide sufficient convenience for current use cases.
