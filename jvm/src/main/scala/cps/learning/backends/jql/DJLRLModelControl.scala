@@ -98,15 +98,20 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
           (value, action)
         }
       else
-        // Exploit: choose best action
+        // Exploit: choose best action based on Q-values
         val input = obsRepr.toTensor(observation)
         val qValues = modelState.qNetworkPredictor.predict(input)
-
-        validActions.zipWithIndex.map { (action, actionIndex) =>
-          val value = qValues.getFloat(actionIndex)
-          (value, action)
+        try {
+          // Extract values before closing tensors
+          validActions.zipWithIndex.map { (action, actionIndex) =>
+            val value = qValues.getFloat(actionIndex)
+            (value, action)
+          }
+        } finally {
+          // Close tensors to prevent memory leak
+          qValues.close()
+          input.close()
         }
-
 
     val retval = summon[CpsScoredLogicMonad[F,Float]].multiScore(scored.map {
       case (score, action) => (score, () => summon[CpsScoredLogicMonad[F, Float]].pure(action))
@@ -133,68 +138,86 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
       val sample = takeSample(newReplayBuffer, params.minBatchSize, params.random)
       val actionRepr = summon[IntRepresentation[A]]
       val manager = modelState.qNetworkTrainer.getManager
+      // Use subManager for all intermediate tensors to ensure cleanup
+      val subManager = manager.newSubManager()
 
-      // Build batch arrays
-      val obsData = new Array[Float](params.minBatchSize * params.observationSize)
-      val nextObsData = new Array[Float](params.minBatchSize * params.observationSize)
-      val rewards = new Array[Float](params.minBatchSize)
-      val actions = new Array[Int](params.minBatchSize)
-      val dones = new Array[Float](params.minBatchSize)
-
-      for (i <- sample.indices) {
-        val exp = sample(i)
-        val obsArray = obsRepr.toTensor(exp.observation).toFloatArray
-        val nextObsArray = obsRepr.toTensor(exp.nextObservation).toFloatArray
-        System.arraycopy(obsArray, 0, obsData, i * params.observationSize, params.observationSize)
-        System.arraycopy(nextObsArray, 0, nextObsData, i * params.observationSize, params.observationSize)
-        rewards(i) = exp.reward
-        actions(i) = actionRepr.toInt(exp.action)
-        dones(i) = if (exp.done) 1.0f else 0.0f
-      }
-
-      // Create NDArrays
-      val obsND = manager.create(obsData, new Shape(params.minBatchSize, params.observationSize))
-      val nextObsND = manager.create(nextObsData, new Shape(params.minBatchSize, params.observationSize))
-      val rewardsND = manager.create(rewards)
-      val donesND = manager.create(dones)
-
-      // Compute target Q values: reward + gamma * max(Q_target(nextObs)) * (1 - done)
-      val nextQValues = modelState.targetNetworkPredictor.predict(nextObsND)
-      val maxNextQ = nextQValues.max(Array(1))
-      val targets = rewardsND.add(maxNextQ.mul(params.gamma).mul(donesND.neg().add(1.0f)))
-
-      // Get current Q values and update only the selected actions
-      val currentQValues = modelState.qNetworkPredictor.predict(obsND)
-      val targetQValues = currentQValues.duplicate()
-
-      for (i <- 0 until params.minBatchSize) {
-        targetQValues.set(new NDIndex(i, actions(i)), targets.getFloat(i))
-      }
-
-      // Train
-      val gc = modelState.qNetworkTrainer.newGradientCollector()
       try {
-        val predictions = modelState.qNetworkTrainer.forward(new NDList(obsND)).singletonOrThrow()
-        val loss = Loss.l2Loss().evaluate(new NDList(targetQValues), new NDList(predictions))
-        gc.backward(loss)
-        modelState.qNetworkTrainer.step()
+        // Build batch arrays - close observation tensors after extracting float arrays
+        val obsData = new Array[Float](params.minBatchSize * params.observationSize)
+        val nextObsData = new Array[Float](params.minBatchSize * params.observationSize)
+        val rewards = new Array[Float](params.minBatchSize)
+        val actions = new Array[Int](params.minBatchSize)
+        val dones = new Array[Float](params.minBatchSize)
+
+        for (i <- sample.indices) {
+          val exp = sample(i)
+          val obsTensor = obsRepr.toTensor(exp.observation)
+          val nextObsTensor = obsRepr.toTensor(exp.nextObservation)
+          try {
+            val obsArray = obsTensor.toFloatArray
+            val nextObsArray = nextObsTensor.toFloatArray
+            System.arraycopy(obsArray, 0, obsData, i * params.observationSize, params.observationSize)
+            System.arraycopy(nextObsArray, 0, nextObsData, i * params.observationSize, params.observationSize)
+          } finally {
+            obsTensor.close()
+            nextObsTensor.close()
+          }
+          rewards(i) = exp.reward
+          actions(i) = actionRepr.toInt(exp.action)
+          dones(i) = if (exp.done) 1.0f else 0.0f
+        }
+
+        // Create NDArrays using subManager
+        val obsND = subManager.create(obsData, new Shape(params.minBatchSize, params.observationSize))
+        val nextObsND = subManager.create(nextObsData, new Shape(params.minBatchSize, params.observationSize))
+        val rewardsND = subManager.create(rewards)
+        val donesND = subManager.create(dones)
+
+        // Compute target Q values: reward + gamma * max(Q_target(nextObs)) * (1 - done)
+        val nextQValues = modelState.targetNetworkPredictor.predict(nextObsND)
+        nextQValues.attach(subManager)
+        val maxNextQ = nextQValues.max(Array(1))
+        maxNextQ.attach(subManager)
+        val targets = rewardsND.add(maxNextQ.mul(params.gamma).mul(donesND.neg().add(1.0f)))
+        targets.attach(subManager)
+
+        // Get current Q values and update only the selected actions
+        val currentQValues = modelState.qNetworkPredictor.predict(obsND)
+        currentQValues.attach(subManager)
+        val targetQValues = currentQValues.duplicate()
+        targetQValues.attach(subManager)
+
+        for (i <- 0 until params.minBatchSize) {
+          targetQValues.set(new NDIndex(i, actions(i)), targets.getFloat(i))
+        }
+
+        // Train
+        val gc = modelState.qNetworkTrainer.newGradientCollector()
+        try {
+          val predictions = modelState.qNetworkTrainer.forward(new NDList(obsND)).singletonOrThrow()
+          val loss = Loss.l2Loss().evaluate(new NDList(targetQValues), new NDList(predictions))
+          gc.backward(loss)
+          modelState.qNetworkTrainer.step()
+        } finally {
+          gc.close()
+        }
+
+        val newTotalSteps = modelState.totalTrainingSteps + 1
+
+        // Periodically update target network parameters
+        if (newTotalSteps % params.targetUpdateFrequency == 0) {
+          copyModelParameters(modelState.qNetwork, modelState.targetNetwork, manager)
+        }
+
+        modelState.copy(
+          replayBuffer = newReplayBuffer,
+          nStepsAfterTraining = 0,
+          totalTrainingSteps = newTotalSteps
+        )
       } finally {
-        gc.close()
+        // Close subManager to free all intermediate tensors
+        subManager.close()
       }
-
-      val newTotalSteps = modelState.totalTrainingSteps + 1
-
-      // Periodically update target network parameters
-      // Note: We don't create a new predictor - the existing predictor will use the updated model
-      if (newTotalSteps % params.targetUpdateFrequency == 0) {
-        copyModelParameters(modelState.qNetwork, modelState.targetNetwork, manager)
-      }
-
-      modelState.copy(
-        replayBuffer = newReplayBuffer,
-        nStepsAfterTraining = 0,
-        totalTrainingSteps = newTotalSteps
-      )
     } finally {
       modelState.trainLock.unlock()
     }

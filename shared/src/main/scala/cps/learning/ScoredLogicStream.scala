@@ -329,14 +329,16 @@ object ScoredLogicStreamT {
       dequeue match
         case None => Empty()
         case Some((frs, tail)) =>
-          frs.flatMap(f).merge(tail.flatMap(f))
+          // Keep tail lazy to avoid forcing all queued branches at once
+          frs.flatMap(f).merge(Suspend(() => tail.flatMap(f), tail.maxScore))
     }
 
     override def flatMapTry[B](f: Try[A] => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] = {
       dequeue match {
         case None => Empty()
         case Some((frs, tail)) =>
-          frs.flatMapTry(f).merge(tail.flatMapTry(f))
+          // Keep tail lazy to avoid forcing all queued branches at once
+          frs.flatMapTry(f).merge(Suspend(() => tail.flatMapTry(f), tail.maxScore))
       }
     }
 

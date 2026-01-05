@@ -34,6 +34,33 @@ class TikTakToeTrainingTest extends FunSuite {
     }
   }
 
+  test("MiniMaxTrainer should run training without errors") {
+    val config = MiniMaxConfig(
+      boardSize = 3,
+      winLength = 3,
+      maxRecursionDepth = 2,
+      numEpisodes = 20,
+      epsilon = 0.5f,
+      batchSize = 16,
+      nStepsBetweenTraining = 5,
+      targetUpdateFrequency = 10,
+      modelPath = None,
+      random = new Random(42)
+    )
+
+    try {
+      val metrics = MiniMaxTrainer.run(config)
+
+      // Basic sanity checks
+      assertEquals(metrics.episode, 20)
+      assert(metrics.player1Wins + metrics.player2Wins + metrics.draws == 20)
+      assert(metrics.avgGameLength > 0)
+    } catch {
+      case e: ai.djl.engine.EngineException if e.getMessage.contains("No PyTorch native library") =>
+        assume(false, s"PyTorch not available: ${e.getMessage}")
+    }
+  }
+
   test("TikTakToeGame should produce valid game states") {
     val game = new TikTakToeGame(3, 3)
     val initState = game.initState
