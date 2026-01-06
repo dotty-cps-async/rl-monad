@@ -114,21 +114,13 @@ trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R:
                 rlMonad.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), gain)
               else if recursionCount > 1 then
                 // Self-recursive: same agent plays opponent's turn
-                // Use first() to get best result without creating continuation structures
+                // Explore ALL opponent responses for proper minimax
                 val opponentResultF = performVirtualStep(env, newState, trainedState, recursionCount - 1)
-                val m = rlMonad
-                val obs = m.observerCpsMonad
-                m.flattenObserver(
-                  obs.map(m.first(opponentResultF)) {
-                    case Some(scala.util.Success(opponentResult)) =>
-                      // Got opponent's best move - return our action with updated state
-                      m.scoredPure((action, RLAgentStepResult.Continued(newState, opponentResult.agentBehaviorState)), gain)
-                    case Some(scala.util.Failure(e)) =>
-                      m.error[(A, RLAgentStepResult[S, AgentBehaviorState])](e)
-                    case None =>
-                      // No valid opponent move - opponent loses, we win
-                      m.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), ordering.maxPositiveValue)
-                  }
+                // flatMap explores all opponent moves; otherwise handles empty (opponent has no valid moves = we win)
+                rlMonad.flatMap(opponentResultF) { opponentResult =>
+                  rlMonad.scoredPure((action, RLAgentStepResult.Continued(newState, opponentResult.agentBehaviorState)), gain)
+                }.otherwise(
+                  rlMonad.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), ordering.maxPositiveValue)
                 )
               else
                 rlMonad.scoredPure((action, RLAgentStepResult.Continued(newState, trainedState)), gain)
