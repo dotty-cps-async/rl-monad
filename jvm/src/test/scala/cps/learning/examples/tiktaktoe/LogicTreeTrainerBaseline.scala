@@ -16,7 +16,11 @@ import cps.learning.ScoredLogicStreamT
 import cps.learning.ScoredLogicStreamT.given
 import cps.learning.ds.LogicalSearchPolicy.given
 
-case class LogicTreeConfig(
+/**
+ * Baseline configuration for LogicTree trainer.
+ * This is a snapshot of the working configuration for comparison with future changes.
+ */
+case class LogicTreeBaselineConfig(
   boardSize: Int = 5,
   winLength: Int = 4,
   numGames: Int = 5000,           // Total number of games (episodes) to play
@@ -28,25 +32,26 @@ case class LogicTreeConfig(
   nStepsBetweenTraining: Int = 5,
   targetUpdateFrequency: Int = 50,
   saveEvery: Int = 500,           // Save model every N games
-  modelPath: Option[String] = Some("models/tiktaktoe-logic-tree"),
+  modelPath: Option[String] = Some("models/tiktaktoe-logic-tree-baseline"),
   random: Random = new Random()
 )
 
 /**
- * An active game being played
+ * An active game being played (baseline version)
  */
-case class ActiveGame(
+case class ActiveGameBaseline(
   state: GameState,
   model: DJRLModelState[GameState, Move],
   stepCount: Int
 )
 
 /**
- * Trainer that explores multiple game trees using a slot-based approach.
+ * Baseline trainer that explores multiple game trees using a slot-based approach.
+ * This is a snapshot for comparison with future changes.
  * - When slots are available: take top N actions, spawn N-1 new games
  * - When no slots available: take only the first (best) action
  */
-class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
+class LogicTreeTrainerBaseline(config: LogicTreeBaselineConfig)(using TensorScope[NDManager]) {
 
   type LogicF[A] = ScoredLogicStreamT[CpsIdentity, A, Float]
   type StepResult = RLAgentStepResult[GameState, DJRLModelState[GameState, Move]]
@@ -58,7 +63,7 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
     GameStateTensorRepresentation(config.boardSize)
 
   val modelParams = DJLRLModelParams(
-    name = "tiktaktoe-logic-tree",
+    name = "tiktaktoe-logic-tree-baseline",
     qBuilder = () => DQNBoardModel.buildBlock(2 * config.boardSize * config.boardSize, config.boardSize * config.boardSize),
     observationSize = 2 * config.boardSize * config.boardSize,
     actionSize = config.boardSize * config.boardSize,
@@ -159,16 +164,16 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
     var gamesCompleted = 0
 
     // Active games being played
-    val activeGames = ArrayBuffer[ActiveGame]()
+    val activeGames = ArrayBuffer[ActiveGameBaseline]()
 
     // Start initial games up to maxParallelGames
     val initialSlots = math.min(config.maxParallelGames, config.numGames)
     for (_ <- 0 until initialSlots) {
-      activeGames += ActiveGame(game.initState, model, 0)
+      activeGames += ActiveGameBaseline(game.initState, model, 0)
     }
 
     while (gamesCompleted < config.numGames && activeGames.nonEmpty) {
-      val newActiveGames = ArrayBuffer[ActiveGame]()
+      val newActiveGames = ArrayBuffer[ActiveGameBaseline]()
       val availableSlots = config.maxParallelGames - activeGames.size
 
       for (activeGame <- activeGames) {
@@ -184,7 +189,7 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
 
           // Start a new game if we haven't reached the limit
           if (gamesCompleted + newActiveGames.size < config.numGames && newActiveGames.size < config.maxParallelGames) {
-            newActiveGames += ActiveGame(game.initState, model, 0)
+            newActiveGames += ActiveGameBaseline(game.initState, model, 0)
           }
 
           // Progress and save
@@ -208,9 +213,9 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
             result match {
               case Success(RLAgentStepResult.Continued(newState, newModel)) =>
                 if (idx == 0) {
-                  newActiveGames += ActiveGame(newState, newModel, activeGame.stepCount + 1)
+                  newActiveGames += ActiveGameBaseline(newState, newModel, activeGame.stepCount + 1)
                 } else if (canSpawn && newActiveGames.size < config.maxParallelGames) {
-                  newActiveGames += ActiveGame(newState, newModel, activeGame.stepCount + 1)
+                  newActiveGames += ActiveGameBaseline(newState, newModel, activeGame.stepCount + 1)
                 }
                 model = newModel
 
@@ -232,20 +237,20 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
 
                 // Start new game if needed (only for idx == 0 to avoid over-spawning from branching)
                 if (idx == 0 && gamesCompleted + newActiveGames.size < config.numGames && newActiveGames.size < config.maxParallelGames) {
-                  newActiveGames += ActiveGame(game.initState, model, 0)
+                  newActiveGames += ActiveGameBaseline(game.initState, model, 0)
                 }
 
               case Success(RLAgentStepResult.InvalidAction(newModel)) =>
                 model = newModel
                 // Keep the game going with current state if this was the primary branch
                 if (idx == 0) {
-                  newActiveGames += ActiveGame(activeGame.state, newModel, activeGame.stepCount + 1)
+                  newActiveGames += ActiveGameBaseline(activeGame.state, newModel, activeGame.stepCount + 1)
                 }
 
               case Failure(e) =>
                 // Keep the game going with current state if this was the primary branch
                 if (idx == 0) {
-                  newActiveGames += ActiveGame(activeGame.state, activeGame.model, activeGame.stepCount + 1)
+                  newActiveGames += ActiveGameBaseline(activeGame.state, activeGame.model, activeGame.stepCount + 1)
                 }
             }
           }
@@ -256,7 +261,7 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
       if (newActiveGames.isEmpty && gamesCompleted < config.numGames) {
         val toSpawn = math.min(config.maxParallelGames, config.numGames - gamesCompleted)
         for (_ <- 0 until toSpawn) {
-          newActiveGames += ActiveGame(game.initState, model, 0)
+          newActiveGames += ActiveGameBaseline(game.initState, model, 0)
         }
       }
 
@@ -282,7 +287,7 @@ class LogicTreeTrainer(config: LogicTreeConfig)(using TensorScope[NDManager]) {
   }
 }
 
-object LogicTreeTrainer {
+object LogicTreeTrainerBaseline {
 
   def detectDevice(): Device = {
     val engine = Engine.getInstance()
@@ -296,18 +301,18 @@ object LogicTreeTrainer {
     }
   }
 
-  def run(config: LogicTreeConfig = LogicTreeConfig()): TrainingMetrics = {
+  def run(config: LogicTreeBaselineConfig = LogicTreeBaselineConfig()): TrainingMetrics = {
     val device = detectDevice()
     given TensorPlatform { type Scope = NDManager } = DJL.withDevice(device)
     TensorScope.withGlobalScope[NDManager, TrainingMetrics] { rootScope =>
-      val trainer = new LogicTreeTrainer(config)
+      val trainer = new LogicTreeTrainerBaseline(config)
       trainer.train()
     }
   }
 
   def main(args: Array[String]): Unit = {
-    println("Starting TikTakToe Logic Tree Training...")
-    val config = LogicTreeConfig()
+    println("Starting TikTakToe Logic Tree Baseline Training...")
+    val config = LogicTreeBaselineConfig()
     println(s"Total games: ${config.numGames}, Max parallel: ${config.maxParallelGames}, Top N: ${config.topN}")
     val metrics = run(config)
     println(s"\nTraining complete!")

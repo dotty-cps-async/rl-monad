@@ -58,15 +58,15 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using TensorScope[NDManager]) {
   // Int representation for Move
   given moveRepr: IntRepresentation[Move] = MoveIntRepresentation(config.boardSize)
 
-  // Board tensor representation with batching support
-  given boardRepr: BatchableTensorRepresentation[Board, NDManager] { type Tensor = NDArray } =
-    BoardTensorRepresentation(config.boardSize)
+  // GameState tensor representation with batching support (relative encoding)
+  given gameStateRepr: BatchableTensorRepresentation[GameState, NDManager] { type Tensor = NDArray } =
+    GameStateTensorRepresentation(config.boardSize)
 
   // Model parameters
   val modelParams = DJLRLModelParams(
     name = "tiktaktoe-selfplay",
-    qBuilder = () => DQNBoardModel.buildBlock(config.boardSize),
-    observationSize = config.boardSize * config.boardSize,
+    qBuilder = () => DQNBoardModel.buildBlock(2 * config.boardSize * config.boardSize, config.boardSize * config.boardSize),
+    observationSize = 2 * config.boardSize * config.boardSize,
     actionSize = config.boardSize * config.boardSize,
     epsilon = config.epsilon,
     gamma = config.gamma,
@@ -77,13 +77,13 @@ class SelfPlayTrainer(config: SelfPlayConfig)(using TensorScope[NDManager]) {
   )
 
   // Model control using DJL backend
-  val modelControl = new DJLRLModelControl[LogicF, GameState, Board, Move](modelParams)
+  val modelControl = new DJLRLModelControl[LogicF, GameState, GameState, Move](modelParams)
 
   // Agent behavior that uses the model
-  class TikTakToeAgentBehavior(mc: DJLRLModelControl[LogicF, GameState, Board, Move])
-      extends RLModelAgentBehavior[LogicF, DJRLModelState[Board, Move], GameState, Board, Move, Float](mc) {
+  class TikTakToeAgentBehavior(mc: DJLRLModelControl[LogicF, GameState, GameState, Move])
+      extends RLModelAgentBehavior[LogicF, DJRLModelState[GameState, Move], GameState, GameState, Move, Float](mc) {
 
-    override def possibleActions(env: RLEnvironment[GameState, Board, Move], envState: GameState, agentState: AgentBehaviorState): IndexedSeq[Move] = {
+    override def possibleActions(env: RLEnvironment[GameState, GameState, Move], envState: GameState, agentState: AgentBehaviorState): IndexedSeq[Move] = {
       (for {
         i <- 0 until config.boardSize
         j <- 0 until config.boardSize

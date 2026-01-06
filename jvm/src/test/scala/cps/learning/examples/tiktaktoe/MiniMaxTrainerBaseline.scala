@@ -16,7 +16,11 @@ import cps.learning.ScoredLogicStreamT
 import cps.learning.ScoredLogicStreamT.given
 import cps.learning.ds.LogicalSearchPolicy.given
 
-case class MiniMaxConfig(
+/**
+ * Baseline configuration for MiniMax trainer.
+ * This is a snapshot of the working configuration for comparison with future changes.
+ */
+case class MiniMaxBaselineConfig(
   boardSize: Int = 5,
   winLength: Int = 4,
   maxRecursionDepth: Int = 4,
@@ -31,15 +35,15 @@ case class MiniMaxConfig(
   targetUpdateFrequency: Int = 50,
   trainingMode: VirtualStepTrainingMode = VirtualStepTrainingMode.OnCommit,
   saveEvery: Int = 500,
-  modelPath: Option[String] = Some("models/tiktaktoe-minimax"),
+  modelPath: Option[String] = Some("models/tiktaktoe-minimax-baseline"),
   random: Random = new Random()
 )
 
 /**
- * MiniMax agent for TikTakToe using RLMiniMaxAgentBehavior.
- * Just implements the 3 abstract methods.
+ * Baseline MiniMax agent for TikTakToe using RLMiniMaxAgentBehavior.
+ * This is a snapshot for comparison with future changes.
  */
-class TikTakToeMiniMaxAgent[F[_]: CpsScoredLogicMonad.Curry[Float]](
+class TikTakToeMiniMaxAgentBaseline[F[_]: CpsScoredLogicMonad.Curry[Float]](
   modelControl: RLModelControl[F, GameState, GameState, Move, Float, DJRLModelState[GameState, Move]],
   boardSize: Int,
   maxDepth: Int,
@@ -69,9 +73,10 @@ class TikTakToeMiniMaxAgent[F[_]: CpsScoredLogicMonad.Curry[Float]](
 }
 
 /**
- * MiniMax trainer for TikTakToe using symmetric self-play.
+ * Baseline MiniMax trainer for TikTakToe using symmetric self-play.
+ * This is a snapshot for comparison with future changes.
  */
-class MiniMaxTrainer(config: MiniMaxConfig)(using TensorScope[NDManager]) {
+class MiniMaxTrainerBaseline(config: MiniMaxBaselineConfig)(using TensorScope[NDManager]) {
 
   type LogicF[A] = ScoredLogicStreamT[CpsIdentity, A, Float]
 
@@ -82,7 +87,7 @@ class MiniMaxTrainer(config: MiniMaxConfig)(using TensorScope[NDManager]) {
     GameStateTensorRepresentation(config.boardSize)
 
   val modelParams = DJLRLModelParams(
-    name = "tiktaktoe-minimax",
+    name = "tiktaktoe-minimax-baseline",
     qBuilder = () => DQNBoardModel.buildBlock(2 * config.boardSize * config.boardSize, config.boardSize * config.boardSize),
     observationSize = 2 * config.boardSize * config.boardSize,
     actionSize = config.boardSize * config.boardSize,
@@ -151,7 +156,7 @@ class MiniMaxTrainer(config: MiniMaxConfig)(using TensorScope[NDManager]) {
       var stepCount = 0
       var gameOver = false
 
-      val agent = new TikTakToeMiniMaxAgent[LogicF](
+      val agent = new TikTakToeMiniMaxAgentBaseline[LogicF](
         modelControl,
         config.boardSize,
         config.maxRecursionDepth,
@@ -235,20 +240,19 @@ class MiniMaxTrainer(config: MiniMaxConfig)(using TensorScope[NDManager]) {
   }
 }
 
-object MiniMaxTrainer {
+object MiniMaxTrainerBaseline {
 
-  def run(config: MiniMaxConfig = MiniMaxConfig()): TrainingMetrics = {
+  def run(config: MiniMaxBaselineConfig = MiniMaxBaselineConfig()): TrainingMetrics = {
     val device = SelfPlayTrainer.detectDevice()
     given TensorPlatform { type Scope = NDManager } = DJL.withDevice(device)
     TensorScope.withGlobalScope[NDManager, TrainingMetrics] { rootScope =>
-      // TensorScope[NDManager] is in scope from the import
-      val trainer = new MiniMaxTrainer(config)
+      val trainer = new MiniMaxTrainerBaseline(config)
       trainer.train()
     }
   }
 
   def main(args: Array[String]): Unit = {
-    println("Starting TikTakToe MiniMax training...")
+    println("Starting TikTakToe MiniMax Baseline training...")
     val metrics = run()
     println(s"\nTraining complete!")
     println(s"Final metrics: P1 wins=${metrics.player1Wins}, P2 wins=${metrics.player2Wins}, draws=${metrics.draws}")

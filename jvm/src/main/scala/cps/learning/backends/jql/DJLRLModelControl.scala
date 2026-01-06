@@ -67,6 +67,7 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
 ) extends RLModelControl[F, S, O, A, Float, DJRLModelState[O, A]] {
 
 
+
   override def initialModel: DJRLModelState[O, A] = {
     val qNetwork = Model.newInstance(s"${params.name}-Q")
     qNetwork.setBlock(params.qBuilder())
@@ -78,7 +79,12 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
       .optOptimizer(Optimizer.adam().build())
 
     val trainer = qNetwork.newTrainer(config)
-    val inputShape = new Shape(params.minBatchSize, params.observationSize)
+    // Use custom inputShape if provided (for CNN), otherwise default to (batchSize, observationSize)
+    // For CNN, initialize with batch=1 to support dynamic batch sizes during inference
+    val inputShape = params.inputShape match {
+      case Some(dims) => new Shape((1L +: dims.map(_.toLong)): _*)  // batch=1 for CNN
+      case None => new Shape(params.minBatchSize, params.observationSize)
+    }
     trainer.initialize(inputShape)
 
     // Initialize target network with the same shape using the trainer's manager
@@ -117,11 +123,26 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
         // Use withSubScope for automatic cleanup
         val trainerManager = modelState.qNetworkTrainer.getManager
         trainerManager.withSubScope { scope =>
-          val input = obsRepr.toTensor(observation, scope)
-          val qValues = modelState.qNetworkPredictor.predict(input)
-          // Extract values before scope closes
+          val inputRaw = obsRepr.toTensor(observation, scope)
+          // Add batch dimension if needed (for 3D CNN input -> 4D batched)
+          val input = if (inputRaw.getShape.dimension() == 3) {
+            inputRaw.expandDims(0)
+          } else inputRaw
+          // Use block forward directly instead of predictor (avoids extra batching)
+          val paramStore = new ai.djl.training.ParameterStore(scope, false)
+          val qValuesRaw = modelState.qNetwork.getBlock.forward(
+            paramStore,
+            new NDList(input),
+            false  // training=false for inference
+          ).singletonOrThrow()
+          // Remove batch dimension if present: (1, actions) -> (actions)
+          val qValues = if (qValuesRaw.getShape.dimension() == 2 && qValuesRaw.getShape.get(0) == 1) {
+            qValuesRaw.squeeze(0)
+          } else qValuesRaw
+          // Extract values before scope closes - extract to array first
+          val qArray = qValues.toFloatArray
           validActions.zipWithIndex.map { (action, actionIndex) =>
-            val value = qValues.getFloat(actionIndex)
+            val value = qArray(actionIndex)
             (value, action)
           }
         }
@@ -174,13 +195,24 @@ class DJLRLModelControl[F[_] : CpsScoredLogicMonad.Curry[Float], S, O, A: IntRep
         val rewardsND = scope.create(rewards)
         val donesND = scope.create(dones)
 
+        // Use block.forward() directly to avoid predictor adding extra batch dimension for CNN
+        val paramStore = new ai.djl.training.ParameterStore(scope, false)
+
         // Compute target Q values: reward + gamma * max(Q_target(nextObs)) * (1 - done)
-        val nextQValues = modelState.targetNetworkPredictor.predict(nextObsND)
+        val nextQValues = modelState.targetNetwork.getBlock.forward(
+          paramStore,
+          new NDList(nextObsND),
+          false  // training=false
+        ).singletonOrThrow()
         val maxNextQ = nextQValues.max(Array(1))
         val targets = rewardsND.add(maxNextQ.mul(params.gamma).mul(donesND.neg().add(1.0f)))
 
         // Get current Q values and update only the selected actions
-        val currentQValues = modelState.qNetworkPredictor.predict(obsND)
+        val currentQValues = modelState.qNetwork.getBlock.forward(
+          paramStore,
+          new NDList(obsND),
+          false
+        ).singletonOrThrow()
         val targetQValues = currentQValues.duplicate()
 
         for (i <- 0 until params.minBatchSize) {

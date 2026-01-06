@@ -69,10 +69,10 @@ class TikTakToeTrainingTest extends FunSuite {
     assertEquals(initState.board.isFull, false)
     assertEquals(game.isFinalState(initState), false)
 
-    // Test observation
+    // Test observation (now returns GameState)
     val observation = game.observe(initState)
-    assertEquals(observation.size, 3)
-    assertEquals(observation.isFull, false)
+    assertEquals(observation.board.size, 3)
+    assertEquals(observation.board.isFull, false)
   }
 
   test("TikTakToeGame should detect winner correctly") {
