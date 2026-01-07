@@ -14,7 +14,7 @@ enum RLAgentStepResult[+S, +AS] {
   case InvalidAction(agentBehaviorState: AS) extends RLAgentStepResult[Nothing, AS]
 }
 
-trait RLAgentBehavior[F[_], S, O, A, R](using CpsScoredLogicMonad[F, R], LinearlyOrderedGroup[R]) {
+trait RLAgentBehavior[F[_], S, O, A, R](using CpsScoredLogicMonad[F, R], ScalingGroup[R], Ordering[R]) {
 
   type AgentBehaviorState
 

@@ -14,7 +14,7 @@ import cps.*
  * - R: Reward/score type
  * - M: Model state type
  */
-trait RLModelControl[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, R: LinearlyOrderedGroup, M] {
+trait RLModelControl[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, R: ScalingGroup : Ordering, M] {
 
   /**
    * Create initial model

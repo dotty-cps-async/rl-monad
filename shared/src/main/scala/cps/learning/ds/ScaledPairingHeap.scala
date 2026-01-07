@@ -2,11 +2,13 @@ package cps.learning.ds
 
 import cps.learning.*
 
-sealed trait ScaledPairingHeap[A: [X] =>> Measured[X, R], R: LinearlyOrderedGroup] {
+sealed trait ScaledPairingHeap[A: [X] =>> Measured[X, R], R: ScalingGroup : Ordering] {
 
   def elementMeasured: Measured[A, R] = summon[Measured[A, R]]
 
-  def measureGroup: LinearlyOrderedGroup[R] = summon[LinearlyOrderedGroup[R]]
+  def factorGroup: ScalingGroup[R] = summon[ScalingGroup[R]]
+
+  def ordering: Ordering[R] = summon[Ordering[R]]
 
   def isEmpty: Boolean
 
@@ -24,7 +26,7 @@ sealed trait ScaledPairingHeap[A: [X] =>> Measured[X, R], R: LinearlyOrderedGrou
 
 object ScaledPairingHeap {
 
-  case class Empty[A: [X] =>> Measured[X, R], R: LinearlyOrderedGroup]() extends ScaledPairingHeap[A, R] {
+  case class Empty[A: [X] =>> Measured[X, R], R: ScalingGroup : Ordering]() extends ScaledPairingHeap[A, R] {
     override def isEmpty: Boolean = true
 
     def insert(newValue: A): ScaledPairingHeap[A, R] =
@@ -43,7 +45,7 @@ object ScaledPairingHeap {
 
   }
 
-  case class Node[A: [X] =>> Measured[X, R], R: LinearlyOrderedGroup](value: A, children: List[ScaledPairingHeap[A, R]], factor: R) extends ScaledPairingHeap[A, R] {
+  case class Node[A: [X] =>> Measured[X, R], R: ScalingGroup : Ordering](value: A, children: List[ScaledPairingHeap[A, R]], factor: R) extends ScaledPairingHeap[A, R] {
 
     override def isEmpty: Boolean = false
 
@@ -56,8 +58,8 @@ object ScaledPairingHeap {
       other match
         case Empty() => this
         case Node(otherValue, otherChildren, otherFactor) =>
-          if measureGroup.gt(elementMeasured.measure(value) |*| factor,
-            elementMeasured.measure(otherValue) |*| otherFactor) then
+          if ordering.gt(factorGroup.scaleBy(elementMeasured.measure(value), factor),
+            factorGroup.scaleBy(elementMeasured.measure(otherValue), otherFactor)) then
             Node(value, other.scale(otherFactor |/| factor) :: children, factor)
           else
             Node(otherValue, this.scale(factor |/| otherFactor) :: otherChildren, otherFactor)
@@ -83,15 +85,15 @@ object ScaledPairingHeap {
 
   }
 
-  def empty[A, R](using m: Measured[A, R], g: LinearlyOrderedGroup[R]): ScaledPairingHeap[A, R] = Empty()
+  def empty[A, R](using m: Measured[A, R], g: ScalingGroup[R], ord: Ordering[R]): ScaledPairingHeap[A, R] = Empty()
 
-  def singleton[A, R](value: A)(using m: Measured[A, R], g: LinearlyOrderedGroup[R]): ScaledPairingHeap[A, R] = Node(value, Nil, g.one)
+  def singleton[A, R](value: A)(using m: Measured[A, R], g: ScalingGroup[R], ord: Ordering[R]): ScaledPairingHeap[A, R] = Node(value, Nil, g.one)
 
-  def merge[A, R](x: ScaledPairingHeap[A, R], y: ScaledPairingHeap[A, R])(using m: Measured[A, R], g: LinearlyOrderedGroup[R]): ScaledPairingHeap[A, R] = {
+  def merge[A, R](x: ScaledPairingHeap[A, R], y: ScaledPairingHeap[A, R])(using m: Measured[A, R], g: ScalingGroup[R], ord: Ordering[R]): ScaledPairingHeap[A, R] = {
     x.merge(y)
   }
 
-  given asScaledHeap[R: LinearlyOrderedGroup]: AsScaledHeap[ScaledPairingHeap, R] with {
+  given asScaledHeap[R: ScalingGroup : Ordering]: AsScaledHeap[ScaledPairingHeap, R] with {
 
     def elementMeasured[A](heap: ScaledPairingHeap[A, R]): Measured[A, R] =
       heap.elementMeasured

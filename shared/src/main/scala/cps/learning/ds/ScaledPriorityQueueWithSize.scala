@@ -1,6 +1,6 @@
 package cps.learning.ds
 
-import cps.learning.LinearlyOrderedGroup
+import cps.learning.ScalingGroup
 
 case class ScaledPriorityQueueWithSize[H[_, _], A, R](heap: H[A, R], size: Int)(using H: AsScaledPriorityQueue[H, R]) {
 
@@ -32,9 +32,9 @@ object ScaledPriorityQueueWithSize {
   def empty[H[_, _], A, R](using H: AsScaledPriorityQueue[H, R]): ScaledPriorityQueueWithSize[H, A, R] =
     ScaledPriorityQueueWithSize(H.empty[A], 0)
 
-  given asSizedScaledPriorityQueue[H[_, _], R: LinearlyOrderedGroup](using AsScaledPriorityQueue[H, R]): AsSizedScaledPriorityQueue[[AX, RX] =>> ScaledPriorityQueueWithSize[H, AX, RX], R] with {
+  given asSizedScaledPriorityQueue[H[_, _], R: ScalingGroup : Ordering](using AsScaledPriorityQueue[H, R]): AsSizedScaledPriorityQueue[[AX, RX] =>> ScaledPriorityQueueWithSize[H, AX, RX], R] with {
 
-    def rOrdering: Ordering[R] = summon[LinearlyOrderedGroup[R]]
+    def rOrdering: Ordering[R] = summon[Ordering[R]]
 
     def empty[A]: ScaledPriorityQueueWithSize[H, A, R] = ScaledPriorityQueueWithSize.empty[H, A, R]
 

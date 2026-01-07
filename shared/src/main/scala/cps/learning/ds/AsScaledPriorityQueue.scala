@@ -1,10 +1,9 @@
 package cps.learning.ds
 
 import cps.learning.*
-import cps.learning.LinearlyOrderedGroup
 
 
-trait AsScaledPriorityQueue[H[_, _], R: LinearlyOrderedGroup] {
+trait AsScaledPriorityQueue[H[_, _], R: ScalingGroup : Ordering] {
 
   def rOrdering: Ordering[R]
 
@@ -34,12 +33,12 @@ object AsScaledPriorityQueue {
   type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
 
 
-  given heapAsScaledPriorityQueue[H[_, _], R](using H: AsScaledHeap[H, R], R: LinearlyOrderedGroup[R]): AsScaledPriorityQueue[[A, R1] =>> H[(A, R1), R1], R] with {
+  given heapAsScaledPriorityQueue[H[_, _], R](using H: AsScaledHeap[H, R], FG: ScalingGroup[R], ord: Ordering[R]): AsScaledPriorityQueue[[A, R1] =>> H[(A, R1), R1], R] with {
 
 
-    def rOrdering: Ordering[R] = R
+    def rOrdering: Ordering[R] = ord
 
-    given pairOrdering[A]: Ordering[(A, R)] = Ordering.by[(A, R), R](_._2)(R)
+    given pairOrdering[A]: Ordering[(A, R)] = Ordering.by[(A, R), R](_._2)(ord)
 
     given elementMeasure[A]: Measured[(A, R), R] with {
       def measure(pair: (A, R)): R = pair._2
@@ -81,12 +80,12 @@ object AsScaledPriorityQueue {
 
   type ScaledFingerTreeHeap[A, R] = ScaledMaxFingerTree[A, R]
 
-  given fingerTreeAsScaledPriorityQueue[R](using R: LinearlyOrderedGroup[R]): AsScaledPriorityQueue[[A, R] =>> ScaledMaxFingerTree[A, R], R] with {
+  given fingerTreeAsScaledPriorityQueue[R](using FG: ScalingGroup[R], ord: Ordering[R]): AsScaledPriorityQueue[[A, R] =>> ScaledMaxFingerTree[A, R], R] with {
 
-    def rOrdering: Ordering[R] = summon[LinearlyOrderedGroup[R]]
+    def rOrdering: Ordering[R] = ord
 
     private given elementMeasured[A]: Measured[A, R] with {
-      def measure(a: A): R = R.one
+      def measure(a: A): R = FG.one
     }
 
     override def empty[A]: ScaledFingerTreeHeap[A, R] = {
@@ -143,11 +142,11 @@ trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R]
   type Curry1[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
   type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
 
-  given heapAsSizedScaledPriorityQueue[H[_, _], R](using heap: AsScaledHeap[H, R], group: LinearlyOrderedGroup[R]): AsScaledPriorityQueue[[A1, R1] =>> HeapPairWithSize[H, A1, R1], R] with {
+  given heapAsSizedScaledPriorityQueue[H[_, _], R](using heap: AsScaledHeap[H, R], FG: ScalingGroup[R], ord: Ordering[R]): AsScaledPriorityQueue[[A1, R1] =>> HeapPairWithSize[H, A1, R1], R] with {
 
-    def rOrdering: Ordering[R] = group
+    def rOrdering: Ordering[R] = ord
 
-    given pairOrdering[A]: Ordering[(A, R)] = Ordering.by[(A, R), R](_._2)(group)
+    given pairOrdering[A]: Ordering[(A, R)] = Ordering.by[(A, R), R](_._2)(ord)
 
     given elementMeasure[A]: Measured[(A, R), R] with {
       def measure(pair: (A, R)): R = pair._2

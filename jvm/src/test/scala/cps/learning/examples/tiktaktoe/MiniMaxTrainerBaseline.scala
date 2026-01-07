@@ -51,7 +51,8 @@ class TikTakToeMiniMaxAgentBaseline[F[_]: CpsScoredLogicMonad.Curry[Float]](
 ) extends RLMiniMaxAgentBehavior[F, GameState, GameState, Move, DJRLModelState[GameState, Move], Float](
   modelControl, maxDepth, trainingMode
 ) {
-  private val ordering = summon[LinearlyOrderedGroup[Float]]
+  private val ordering = summon[Ordering[Float]]
+  private val factorGroup = summon[ScalingGroup[Float]]
 
   override def possibleActions(env: RLEnvironment[GameState, GameState, Move], state: GameState, agentState: DJRLModelState[GameState, Move]): IndexedSeq[Move] = {
     (for {
@@ -63,10 +64,10 @@ class TikTakToeMiniMaxAgentBaseline[F[_]: CpsScoredLogicMonad.Curry[Float]](
 
   override def gainEstimation(env: RLEnvironment[GameState, GameState, Move], state: GameState, reward: Float): Float = {
     // reward > 0 means acting player won, < 0 means loss/draw
-    if reward > 0.5f then ordering.maxPositiveValue
+    if reward > 0.5f then factorGroup.maxPositiveValue
     else if reward < -0.5f then 0.0f  // Loss
     else if env.isFinalState(state) then 0.5f  // Draw
-    else ordering.one  // Ongoing - neutral gain (multiplicative identity)
+    else factorGroup.one  // Ongoing - neutral gain (multiplicative identity)
   }
 
   override def lossThreshold: Float = 0.1f

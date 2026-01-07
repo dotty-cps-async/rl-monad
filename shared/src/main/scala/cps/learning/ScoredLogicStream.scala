@@ -9,7 +9,7 @@ import cps.learning.ds.*
 import cps.learning.ds.MinMax.given
 
 
-sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy] {
+sealed trait ScoredLogicStreamT[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy] {
 
   import ScoredLogicStreamT.*
 
@@ -47,31 +47,33 @@ object ScoredLogicStreamT {
 
   type DefaultSizedQueue[A, R] = ScaledPriorityQueueWithSize[DefaultQueue, A, R]
 
-  def asPQ[A, R: LinearlyOrderedGroup]: AsScaledPriorityQueue[DefaultQueue, R] = {
+  def asPQ[A, R: ScalingGroup : Ordering]: AsScaledPriorityQueue[DefaultQueue, R] = {
     summon[AsScaledPriorityQueue[DefaultQueue, R]]
   }
 
-  def asSSPQ[A, R: LinearlyOrderedGroup]: AsSizedScaledPriorityQueue[DefaultSizedQueue, R] = {
+  def asSSPQ[A, R: ScalingGroup : Ordering]: AsSizedScaledPriorityQueue[DefaultSizedQueue, R] = {
     summon[AsSizedScaledPriorityQueue[DefaultSizedQueue, R]]
   }
 
-  def R[R](using LinearlyOrderedMultiplicativeMonoid[R]) = summon[LinearlyOrderedMultiplicativeMonoid[R]]
+  def R[R](using ScalingMonoid[R]) = summon[ScalingMonoid[R]]
 
-  def one[R](using LinearlyOrderedMultiplicativeMonoid[R]) = summon[LinearlyOrderedMultiplicativeMonoid[R]].one
+  def rOrd[R](using Ordering[R]) = summon[Ordering[R]]
+
+  def one[R](using ScalingMonoid[R]) = summon[ScalingMonoid[R]].one
 
   def lsPolicy[R](using lp: LogicalSearchPolicy[R]) = lp
 
-  case class Empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]() extends ScoredLogicStreamT[F, A, R] {
+  case class Empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]() extends ScoredLogicStreamT[F, A, R] {
 
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] =
-      other
+      other.applyScore(otherScore)
 
     def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = other
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] = this
 
-    def maxScore: R = summon[LinearlyOrderedMultiplicativeMonoid[R]].zero
+    def maxScore: R = summon[ScalingMonoid[R]].zero
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
       Empty()
@@ -91,10 +93,10 @@ object ScoredLogicStreamT {
 
   }
 
-  case class Pure[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](value: A, score: R) extends ScoredLogicStreamT[F, A, R] {
+  case class Pure[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
-      Pure(value, summon[LinearlyOrderedMultiplicativeMonoid[R]].times(score, r))
+      Pure(value, summon[ScalingGroup[R]].scaleBy(r, score))
 
     def maxScore: R = score
 
@@ -146,11 +148,11 @@ object ScoredLogicStreamT {
 
   }
 
-  case class Error[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](error: Throwable) extends ScoredLogicStreamT[F, A, R] {
+  case class Error[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](error: Throwable) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] = this
 
-    def maxScore: R = summon[LinearlyOrderedMultiplicativeMonoid[R]].maxPositiveValue
+    def maxScore: R = summon[ScalingMonoid[R]].maxPositiveValue
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] =
       this
@@ -180,20 +182,19 @@ object ScoredLogicStreamT {
 
   }
 
-  case class WaitF[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](waited: F[ScoredLogicStreamT[F, A, R]], score: R) extends ScoredLogicStreamT[F, A, R] {
+  case class WaitF[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](waited: F[ScoredLogicStreamT[F, A, R]], score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
-      WaitF(waited, summon[LinearlyOrderedMultiplicativeMonoid[R]].times(score, r))
+      WaitF(waited, summon[ScalingGroup[R]].scaleBy(r, score))
 
     def maxScore: R = score
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] = {
-      val maxScore = R.max(score, otherScore)
       Queue.empty.enqueue(this, score).enqueue(Suspend(() => other, otherScore), otherScore)
     }
 
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
-      WaitF(LM.observerCpsMonad.map(waited)(x => (x |*| score).merge(other)), R.max(score, other.maxScore))
+      WaitF(LM.observerCpsMonad.map(waited)(x => (x |*| score).merge(other)), rOrd.max(score, other.maxScore))
     }
 
     override def flatMap[B](f: A => ScoredLogicStreamT[F, B, R]): ScoredLogicStreamT[F, B, R] =
@@ -222,11 +223,11 @@ object ScoredLogicStreamT {
 
   }
 
-  case class Suspend[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](
+  case class Suspend[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](
                                                                                             thunk: () => ScoredLogicStreamT[F, A, R], score: R) extends ScoredLogicStreamT[F, A, R] {
 
     def applyScore(r: R): ScoredLogicStreamT[F, A, R] =
-      Suspend(thunk, R.times(score, r))
+      Suspend(thunk, summon[ScalingGroup[R]].scaleBy(r, score))
 
     def maxScore: R = score
 
@@ -277,7 +278,7 @@ object ScoredLogicStreamT {
   }
 
 
-  case class Queue[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](streams: DefaultQueue[ScoredLogicStreamT[F, A, R], R], resultPool: DefaultSizedQueue[Pure[F, A, R], R]) extends ScoredLogicStreamT[F, A, R] {
+  case class Queue[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](streams: DefaultQueue[ScoredLogicStreamT[F, A, R], R], resultPool: DefaultSizedQueue[Pure[F, A, R], R]) extends ScoredLogicStreamT[F, A, R] {
 
     def enqueue(other: ScoredLogicStreamT[F, A, R], otherScore: R): Queue[F, A, R] = {
       Queue(asPQ.enqueue(other, otherScore, streams), resultPool)
@@ -322,7 +323,7 @@ object ScoredLogicStreamT {
         case Some(maxPriority) =>
           resultPool.findMaxPriority match {
             case None => maxPriority
-            case Some(rpMaxPriority) => R.max(maxPriority, rpMaxPriority)
+            case Some(rpMaxPriority) => rOrd.max(maxPriority, rpMaxPriority)
           }
     }
 
@@ -502,24 +503,24 @@ object ScoredLogicStreamT {
   }
 
   object Queue {
-    def empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]: Queue[F, A, R] =
+    def empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: Queue[F, A, R] =
       Queue(asPQ.empty, asSSPQ.empty)
   }
 
 
-  def empty[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy]: ScoredLogicStreamT[F, A, R] = Empty()
+  def empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: ScoredLogicStreamT[F, A, R] = Empty()
 
-  def singleton[F[_] : CpsTryMonad, A, R: LinearlyOrderedGroup : LogicalSearchPolicy](value: A, priority: R): ScoredLogicStreamT[F, A, R] =
+  def singleton[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, priority: R): ScoredLogicStreamT[F, A, R] =
     Pure(value, priority)
 
-  class ScoredLogicStreamTMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup : LogicalSearchPolicy]
+  class ScoredLogicStreamTMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]
     extends CpsScoredLogicMonadInstanceContext[[A] =>> ScoredLogicStreamT[F, A, R], R] {
 
     override type Observer[A] = F[A]
 
     override val observerCpsMonad: CpsTryMonad[F] = summon[CpsTryMonad[F]]
 
-    override def pure[T](t: T): ScoredLogicStreamT[F, T, R] = ScoredLogicStreamT.Pure(t, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
+    override def pure[T](t: T): ScoredLogicStreamT[F, T, R] = ScoredLogicStreamT.Pure(t, summon[ScalingMonoid[R]].one)
 
     override def error[T](e: Throwable): ScoredLogicStreamT[F, T, R] = ScoredLogicStreamT.Error(e)
 
@@ -528,7 +529,7 @@ object ScoredLogicStreamT {
     override def scoredPure[A](a: A, score: R): ScoredLogicStreamT[F, A, R] = ScoredLogicStreamT.Pure(a, score)
 
     override def mplus[A](a: ScoredLogicStreamT[F, A, R], b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
-      a.scoredMplus(b, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
+      a.scoredMplus(b, summon[ScalingMonoid[R]].one)
 
     override def scoredMplus[A](a: ScoredLogicStreamT[F, A, R], bScore: R, b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
       a.scoredMplus(b, bScore)
@@ -544,7 +545,7 @@ object ScoredLogicStreamT {
 
 
     override def flattenObserver[A](fma: F[ScoredLogicStreamT[F, A, R]]): ScoredLogicStreamT[F, A, R] =
-      ScoredLogicStreamT.WaitF(fma, summon[LinearlyOrderedMultiplicativeMonoid[R]].one)
+      ScoredLogicStreamT.WaitF(fma, summon[ScalingMonoid[R]].one)
 
 
     override def fsplit[A](c: ScoredLogicStreamT[F, A, R]): F[Option[(Try[A], ScoredLogicStreamT[F, A, R])]] =
@@ -559,11 +560,11 @@ object ScoredLogicStreamT {
   }
 
 
-  given cpsScoredLogicMonad[F[_] : CpsTryMonad, R: LinearlyOrderedGroup : LogicalSearchPolicy]: ScoredLogicStreamTMonad[F, R] =
+  given cpsScoredLogicMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]: ScoredLogicStreamTMonad[F, R] =
     new ScoredLogicStreamTMonad[F, R]
 
 
-  private def LM[F[_] : CpsTryMonad, R: LinearlyOrderedGroup](using lm: ScoredLogicStreamTMonad[F, R]) = lm
+  private def LM[F[_] : CpsTryMonad, R: ScalingGroup : Ordering](using lm: ScoredLogicStreamTMonad[F, R]) = lm
 
   //def emptyQueue
 

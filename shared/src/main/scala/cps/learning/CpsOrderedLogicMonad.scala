@@ -8,12 +8,12 @@ import cps.syntax.*
 /**
  * Order the branches of the computation (inside some window) by a scoring function.
  */
-trait CpsOrderedLogicMonad[F[_], R: LinearlyOrderedGroup] extends CpsLogicMonad[F] {
+trait CpsOrderedLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMonad[F] {
 
   type Context <: CpsOrderedLogicMonadContext[F, R]
 
   /**
-   * Set ordering for the branches of the computation, 
+   * Set ordering for the branches of the computation,
    * Typpical usage:
    * ```scala
    * val alterna = m.orderBy(score, windowLength)

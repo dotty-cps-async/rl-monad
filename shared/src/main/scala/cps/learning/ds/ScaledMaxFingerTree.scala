@@ -7,11 +7,13 @@ import cps.learning.*
  * Based on the finger tree implementation but with scaled factor in each tree
  * and fixed monoid (max operation) over ordering.
  */
-sealed trait ScaledMaxFingerTree[A: Measured.Curry1[R], R: LinearlyOrderedGroup] {
+sealed trait ScaledMaxFingerTree[A: Measured.Curry1[R], R: ScalingGroup : Ordering] {
 
   def measured: Measured[A, R] = summon[Measured[A, R]]
 
-  def rGroup: LinearlyOrderedGroup[R] = summon[LinearlyOrderedGroup[R]]
+  def rGroup: ScalingGroup[R] = summon[ScalingGroup[R]]
+
+  def rOrdering: Ordering[R] = summon[Ordering[R]]
 
   def measure: R
 
@@ -69,33 +71,35 @@ sealed trait ScaledMaxFingerTree[A: Measured.Curry1[R], R: LinearlyOrderedGroup]
 
 object ScaledMaxFingerTree {
 
+  // Helper for max using Ordering
+  private def maxOf[R: Ordering](values: R*): R = values.max
 
-  given scaledMeasured[A, R](using Measured[A, R], LinearlyOrderedGroup[R]): Measured[ScaledValue[A, R], R] with {
+  given scaledMeasured[A, R](using Measured[A, R], ScalingGroup[R]): Measured[ScaledValue[A, R], R] with {
     def measure(value: ScaledValue[A, R]): R =
-      summon[Measured[A, R]].measure(value.value) |*| value.factor
+      summon[ScalingGroup[R]].scaleBy(summon[Measured[A, R]].measure(value.value), value.factor)
   }
 
-  given [A, R](using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): Measured[ScaledMaxFingerTree[A, R], R] with {
+  given [A, R](using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): Measured[ScaledMaxFingerTree[A, R], R] with {
     def measure(tree: ScaledMaxFingerTree[A, R]): R = tree match {
       case Empty() => rG.zero
-      case Single(value) => m.measure(value.value) |*| value.factor
+      case Single(value) => rG.scaleBy(m.measure(value.value), value.factor)
       case Deep(left, middle, right) =>
         val leftMeasure = left.measure
         val middleMeasure = middle.measure
         val rightMeasure = right.measure
-        rG.max(rG.max(leftMeasure, middleMeasure), rightMeasure)
+        ord.max(ord.max(leftMeasure, middleMeasure), rightMeasure)
     }
   }
 
-  given [A, R](using m: Measured[A, R], rGroup: LinearlyOrderedGroup[R]): Measured[Node[A, R], R] with {
+  given [A, R](using m: Measured[A, R], rGroup: ScalingGroup[R]): Measured[Node[A, R], R] with {
     def measure(node: Node[A, R]): R = node.measure
   }
 
-  extension [A, L](a: A)(using lGroup: LinearlyOrderedGroup[L]) {
+  extension [A, L](a: A)(using lGroup: ScalingGroup[L]) {
     def scaled(factor: L): ScaledValue[A, L] = ScaledValue(a, factor)
   }
 
-  case class Empty[A: Measured.Curry1[R], R: LinearlyOrderedGroup]() extends ScaledMaxFingerTree[A, R] {
+  case class Empty[A: Measured.Curry1[R], R: ScalingGroup : Ordering]() extends ScaledMaxFingerTree[A, R] {
 
     def measure: R = rGroup.zero
 
@@ -110,7 +114,7 @@ object ScaledMaxFingerTree {
     def scale(factor: R): ScaledMaxFingerTree[A, R] = this
   }
 
-  case class Single[A: Measured.Curry1[R], R: LinearlyOrderedGroup](value: ScaledValue[A, R]) extends ScaledMaxFingerTree[A, R] {
+  case class Single[A: Measured.Curry1[R], R: ScalingGroup : Ordering](value: ScaledValue[A, R]) extends ScaledMaxFingerTree[A, R] {
 
     def measure: R = summon[Measured[ScaledValue[A, R], R]].measure(value)
 
@@ -126,22 +130,21 @@ object ScaledMaxFingerTree {
       Single(value.copy(factor = value.factor |*| factor))
   }
 
-  case class Deep[A, R: LinearlyOrderedGroup](
+  case class Deep[A, R: ScalingGroup : Ordering](
                                                left: Digit[A, R],
                                                middle: ScaledMaxFingerTree[Node[A, R], R],
                                                right: Digit[A, R]
                                              )(using Measured[A, R]) extends ScaledMaxFingerTree[A, R] {
 
     private def combineMeasures(values: ScaledValue[A, R]*): R = {
-      values.map(v => measured.measure(v.value) |*| v.factor)
-        .foldLeft(rGroup.zero)(rGroup.max)
+      values.map(v => rGroup.scaleBy(measured.measure(v.value), v.factor)).max
     }
 
     def measure: R = {
       val leftMeasure = left.measure
       val middleMeasure = middle.measure
       val rightMeasure = right.measure
-      rGroup.max(rGroup.max(leftMeasure, middleMeasure), rightMeasure)
+      rOrdering.max(rOrdering.max(leftMeasure, middleMeasure), rightMeasure)
     }
 
     def isEmpty: Boolean = false
@@ -175,9 +178,9 @@ object ScaledMaxFingerTree {
 
     def appended(a: ScaledValue[A, R]): Digit[A, R]
 
-    def measure(using Measured[A, R], LinearlyOrderedGroup[R]): R
+    def measure(using Measured[A, R], ScalingGroup[R], Ordering[R]): R
 
-    def toTree(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = this match {
+    def toTree(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = this match {
       case Digit.One(a) => Single(a)
       case Digit.Two(a, b) => Deep(Digit.One(a), Empty(), Digit.One(b))
       case Digit.Three(a, b, c) => Deep(Digit.Two(a, b), Empty(), Digit.One(c))
@@ -219,7 +222,7 @@ object ScaledMaxFingerTree {
       case Digit.Four(a, b, c, d) => List(a, b, c, d)
     }
 
-    def scale(x: R)(using LinearlyOrderedGroup[R]): Digit[A, R] = this match {
+    def scale(x: R)(using ScalingGroup[R]): Digit[A, R] = this match {
       case Digit.One(a) => Digit.One(a.scale(x))
       case Digit.Two(a, b) => Digit.Two(a.scale(x), b.scale(x))
       case Digit.Three(a, b, c) => Digit.Three(a.scale(x), b.scale(x), c.scale(x))
@@ -234,8 +237,8 @@ object ScaledMaxFingerTree {
 
       def appended(x: ScaledValue[A, R]): Digit[A, R] = Two(a, x)
 
-      def measure(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): R =
-        m.measure(a.value) |*| a.factor
+      def measure(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): R =
+        rG.scaleBy(m.measure(a.value), a.factor)
     }
 
     case class Two[A, R](a: ScaledValue[A, R], b: ScaledValue[A, R]) extends Digit[A, R] {
@@ -243,8 +246,8 @@ object ScaledMaxFingerTree {
 
       def appended(x: ScaledValue[A, R]): Digit[A, R] = Three(a, b, x)
 
-      def measure(using sm: Measured[A, R], lG: LinearlyOrderedGroup[R]): R =
-        (sm.measure(a.value) |*| a.factor) max (sm.measure(b.value) |*| b.factor)
+      def measure(using sm: Measured[A, R], fg: ScalingGroup[R], ord: Ordering[R]): R =
+        ord.max(fg.scaleBy(sm.measure(a.value), a.factor), fg.scaleBy(sm.measure(b.value), b.factor))
     }
 
     case class Three[A, R](a: ScaledValue[A, R], b: ScaledValue[A, R], c: ScaledValue[A, R]) extends Digit[A, R] {
@@ -252,8 +255,12 @@ object ScaledMaxFingerTree {
 
       def appended(x: ScaledValue[A, R]): Digit[A, R] = Four(a, b, c, x)
 
-      def measure(using sm: Measured[A, R], lG: LinearlyOrderedGroup[R]): R =
-        lG.max(lG.max(sm.measure(a.value) |*| a.factor, sm.measure(b.value) |*| b.factor), sm.measure(c.value) |*| c.factor)
+      def measure(using sm: Measured[A, R], fg: ScalingGroup[R], ord: Ordering[R]): R = {
+        val ma = fg.scaleBy(sm.measure(a.value), a.factor)
+        val mb = fg.scaleBy(sm.measure(b.value), b.factor)
+        val mc = fg.scaleBy(sm.measure(c.value), c.factor)
+        ord.max(ord.max(ma, mb), mc)
+      }
     }
 
     case class Four[A, R](a: ScaledValue[A, R], b: ScaledValue[A, R], c: ScaledValue[A, R], d: ScaledValue[A, R]) extends Digit[A, R] {
@@ -261,16 +268,18 @@ object ScaledMaxFingerTree {
 
       def appended(x: ScaledValue[A, R]): Digit[A, R] = throw new IllegalStateException("Cannot append to Four digit")
 
-      def measure(using sm: Measured[A, R], lG: LinearlyOrderedGroup[R]): R =
-        lG.max(
-          lG.max(sm.measure(a.value) |*| a.factor, sm.measure(b.value) |*| b.factor),
-          lG.max(sm.measure(c.value) |*| c.factor, sm.measure(d.value) |*| d.factor)
-        )
+      def measure(using sm: Measured[A, R], fg: ScalingGroup[R], ord: Ordering[R]): R = {
+        val ma = fg.scaleBy(sm.measure(a.value), a.factor)
+        val mb = fg.scaleBy(sm.measure(b.value), b.factor)
+        val mc = fg.scaleBy(sm.measure(c.value), c.factor)
+        val md = fg.scaleBy(sm.measure(d.value), d.factor)
+        ord.max(ord.max(ma, mb), ord.max(mc, md))
+      }
     }
   }
 
   extension [A, R](optd: Option[Digit[A, R]]) {
-    def toTree(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = optd match {
+    def toTree(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = optd match {
       case None => Empty()
       case Some(d) => d.toTree
     }
@@ -298,45 +307,27 @@ object ScaledMaxFingerTree {
       case Node3(a, b, c, _) => Digit.Three(a, b, c)
     }
 
-    def scale(factor: R)(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): Node[A, R] = this match {
+    def scale(factor: R)(using m: Measured[A, R], rG: ScalingGroup[R]): Node[A, R] = this match {
       case Node2(a, b, maxAB) =>
         val a1 = a.scale(factor)
         val b1 = b.scale(factor)
-        Node2(a1, b1, maxAB |*| factor)
+        Node2(a1, b1, rG.scaleBy(maxAB, factor))
       case Node3(a, b, c, maxABC) =>
         val a1 = a.scale(factor)
         val b1 = b.scale(factor)
         val c1 = c.scale(factor)
-        Node3(a1, b1, c1, maxABC |*| factor)
+        Node3(a1, b1, c1, rG.scaleBy(maxABC, factor))
     }
-
-    /*
-    def find(p: R => Boolean, acc: R)(using m: Measured[A, R], lg: LinearlyOrderedGroup[R]): Option[ScaledValue[A, R]] = this match {
-      case Node2(a, b, measure) =>
-        val ma = m.measure(a.value) |*| a.factor
-        val mb = m.measure(b.value) |*| b.factor
-        if (p(acc max ma)) then Some(a)
-        else if (p(acc max mb)) then Some(b)
-        else None
-      case Node3(a, b, c, measure) =>
-        val ma = m.measure(a.value) |*| a.factor
-        val mb = m.measure(b.value) |*| b.factor
-        val mc = m.measure(c.value) |*| c.factor
-        if (p(acc max ma)) then Some(a)
-        else if (p(acc max mb)) then Some(b)
-        else if (p(acc max mc)) then Some(c)
-        else None
-    }*/
 
   }
 
   extension [A, R](self: ScaledValue[Node[A, R], R]) {
-    def toDigit(using Measured[A, R], LinearlyOrderedGroup[R]): Digit[A, R] = self.value.scale(self.factor).toDigit
+    def toDigit(using Measured[A, R], ScalingGroup[R]): Digit[A, R] = self.value.scale(self.factor).toDigit
   }
 
-  def empty[A, R](using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = Empty()
+  def empty[A, R](using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = Empty()
 
-  def singleton[A, R](value: A)(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] =
+  def singleton[A, R](value: A)(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] =
     Single(ScaledValue(value, rG.one))
 
   case class Split[F[_], A](left: F[A], pivot: A, right: F[A])
@@ -350,7 +341,7 @@ object ScaledMaxFingerTree {
     case Cons[A, R](head: ScaledValue[A, R], tail: ScaledMaxFingerTree[A, R]) extends SeqView[A, R]
   }
 
-  def seqViewLeft[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): SeqView[A, R] = {
+  def seqViewLeft[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): SeqView[A, R] = {
     tree match {
       case Empty() => SeqView.Nil()
       case Single(value) => SeqView.Cons(value, Empty())
@@ -361,7 +352,7 @@ object ScaledMaxFingerTree {
     }
   }
 
-  def seqViewRight[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): SeqView[A, R] = {
+  def seqViewRight[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): SeqView[A, R] = {
     tree match {
       case Empty() => SeqView.Nil()
       case Single(value) => SeqView.Cons(value, Empty())
@@ -372,7 +363,7 @@ object ScaledMaxFingerTree {
     }
   }
 
-  def deepL[A, R](optLeft: Option[Digit[A, R]], middle: ScaledMaxFingerTree[Node[A, R], R], right: Digit[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = {
+  def deepL[A, R](optLeft: Option[Digit[A, R]], middle: ScaledMaxFingerTree[Node[A, R], R], right: Digit[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = {
     optLeft match {
       case None =>
         seqViewLeft(middle) match
@@ -385,7 +376,7 @@ object ScaledMaxFingerTree {
     }
   }
 
-  def deepR[A, R](left: Digit[A, R], middle: ScaledMaxFingerTree[Node[A, R], R], optRight: Option[Digit[A, R]])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = {
+  def deepR[A, R](left: Digit[A, R], middle: ScaledMaxFingerTree[Node[A, R], R], optRight: Option[Digit[A, R]])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = {
     optRight match {
       case None =>
         seqViewRight(middle) match
@@ -398,40 +389,40 @@ object ScaledMaxFingerTree {
     }
   }
 
-  def splitMaxDigit[A, R](d: Digit[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledSplit[[X] =>> Option[Digit[X, R]], A, R] = {
+  def splitMaxDigit[A, R](d: Digit[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledSplit[[X] =>> Option[Digit[X, R]], A, R] = {
     d match {
       case Digit.One(a) =>
         ScaledSplit(None, a, None)
       case Digit.Two(a, b) =>
-        val ma = m.measure(a.value) |*| a.factor
-        val mb = m.measure(b.value) |*| b.factor
+        val ma = rG.scaleBy(m.measure(a.value), a.factor)
+        val mb = rG.scaleBy(m.measure(b.value), b.factor)
         //TODO: use instead gtEx something like approximate equality with epsilon
-        if (rG.gteq(ma, mb)) ScaledSplit(None, a, Some(Digit.One(b)))
+        if (ord.gteq(ma, mb)) ScaledSplit(None, a, Some(Digit.One(b)))
         else ScaledSplit(Some(Digit.One(a)), b, None)
       case Digit.Three(a, b, c) =>
-        val ma = m.measure(a.value) |*| a.factor
-        val mb = m.measure(b.value) |*| b.factor
-        val mc = m.measure(c.value) |*| c.factor
-        val maxMeasure = rG.max(rG.max(ma, mb), mc)
+        val ma = rG.scaleBy(m.measure(a.value), a.factor)
+        val mb = rG.scaleBy(m.measure(b.value), b.factor)
+        val mc = rG.scaleBy(m.measure(c.value), c.factor)
+        val maxMeasure = ord.max(ord.max(ma, mb), mc)
         //TODO: use equalsApprox
-        if (rG.equals(ma, maxMeasure)) ScaledSplit(None, a, Some(Digit.Two(b, c)))
-        else if (rG.equals(mb, maxMeasure)) ScaledSplit(Some(Digit.One(a)), b, Some(Digit.One(c)))
+        if (ord.equiv(ma, maxMeasure)) ScaledSplit(None, a, Some(Digit.Two(b, c)))
+        else if (ord.equiv(mb, maxMeasure)) ScaledSplit(Some(Digit.One(a)), b, Some(Digit.One(c)))
         else ScaledSplit(Some(Digit.Two(a, b)), c, None)
       case Digit.Four(a, b, c, d) =>
-        val ma = m.measure(a.value) |*| a.factor
-        val mb = m.measure(b.value) |*| b.factor
-        val mc = m.measure(c.value) |*| c.factor
-        val md = m.measure(d.value) |*| d.factor
-        val maxMeasure = rG.max(rG.max(ma, mb), rG.max(mc, md))
-        if (rG.equals(ma, maxMeasure)) ScaledSplit(None, a, Some(Digit.Three(b, c, d)))
-        else if (rG.equals(mb, maxMeasure)) ScaledSplit(Some(Digit.One(a)), b, Some(Digit.Two(c, d)))
-        else if (rG.equals(mc, maxMeasure)) ScaledSplit(Some(Digit.Two(a, b)), c, Some(Digit.One(d)))
+        val ma = rG.scaleBy(m.measure(a.value), a.factor)
+        val mb = rG.scaleBy(m.measure(b.value), b.factor)
+        val mc = rG.scaleBy(m.measure(c.value), c.factor)
+        val md = rG.scaleBy(m.measure(d.value), d.factor)
+        val maxMeasure = ord.max(ord.max(ma, mb), ord.max(mc, md))
+        if (ord.equiv(ma, maxMeasure)) ScaledSplit(None, a, Some(Digit.Three(b, c, d)))
+        else if (ord.equiv(mb, maxMeasure)) ScaledSplit(Some(Digit.One(a)), b, Some(Digit.Two(c, d)))
+        else if (ord.equiv(mc, maxMeasure)) ScaledSplit(Some(Digit.Two(a, b)), c, Some(Digit.One(d)))
         else ScaledSplit(Some(Digit.Three(a, b, c)), d, None)
     }
   }
 
 
-  def splitMax[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledSplit[[X] =>> ScaledMaxFingerTree[X, R], A, R] = {
+  def splitMax[A, R](tree: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledSplit[[X] =>> ScaledMaxFingerTree[X, R], A, R] = {
     val treeMeasure = tree.measure
     tree match
       case Empty() => throw new IllegalArgumentException("Cannot split an empty tree")
@@ -442,10 +433,10 @@ object ScaledMaxFingerTree {
         val middleMeasure = middle.measure
         val rightMeasure = suffix.measure
         // TODO: use equalsApprox
-        if (rG.gteq(leftMeasure, treeMeasure)) then
+        if (ord.gteq(leftMeasure, treeMeasure)) then
           val digitSplit = splitMaxDigit(prefix)
           ScaledSplit(digitSplit.left.toTree, digitSplit.pivot, deepL(digitSplit.right, middle, suffix))
-        else if (rG.gteq(middleMeasure, treeMeasure)) then
+        else if (ord.gteq(middleMeasure, treeMeasure)) then
           val middleSplit = splitMax(middle)
           val digitSplit = splitMaxDigit(middleSplit.pivot.toDigit)
           ScaledSplit(deepR(prefix, middleSplit.left, digitSplit.left),
@@ -462,18 +453,18 @@ object ScaledMaxFingerTree {
   }
 
 
-  def concat[A, R](left: ScaledMaxFingerTree[A, R], right: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: LinearlyOrderedGroup[R]): ScaledMaxFingerTree[A, R] = {
+  def concat[A, R](left: ScaledMaxFingerTree[A, R], right: ScaledMaxFingerTree[A, R])(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = {
 
     def nodes[A](l: List[ScaledValue[A, R]])(using Measured[A, R]): List[ScaledValue[Node[A, R], R]] = {
       // note that size of list is always bigger than 1, because digits from leaft and right are always at least 1 element
       l match
-        case Seq(a, b) => List(Node.Node2(a, b, rG.max(a.measure, b.measure)).scaled(rG.one))
-        case Seq(a, b, c) => List(Node.Node3(a, b, c, rG.maxOf(a.measure, b.measure, c.measure)).scaled(rG.one))
+        case Seq(a, b) => List(Node.Node2(a, b, ord.max(a.measure, b.measure)).scaled(rG.one))
+        case Seq(a, b, c) => List(Node.Node3(a, b, c, Seq(a.measure, b.measure, c.measure).max).scaled(rG.one))
         case Seq(a, b, c, d) =>
-          List(Node.Node2(a, b, rG.max(a.measure, b.measure)).scaled(rG.one),
-            Node.Node2(c, d, rG.max(c.measure, d.measure)).scaled(rG.one))
+          List(Node.Node2(a, b, ord.max(a.measure, b.measure)).scaled(rG.one),
+            Node.Node2(c, d, ord.max(c.measure, d.measure)).scaled(rG.one))
         case Seq(a, b, c, rest@_*) =>
-          Node.Node3(a, b, c, rG.maxOf(a.measure, b.measure, c.measure)).scaled(rG.one) +: nodes(rest.toList)
+          Node.Node3(a, b, c, Seq(a.measure, b.measure, c.measure).max).scaled(rG.one) +: nodes(rest.toList)
         case _ => throw new IllegalArgumentException("Invalid list for nodes creation")
     }
 
@@ -501,53 +492,4 @@ object ScaledMaxFingerTree {
     app3(left, List.empty, right)
   }
 
-  /*
-  class AsScaledPriorityQueueImpl[R: LinearlyOrderedGroup] extends AsScaledPriorityQueue[ScaledMaxFingerTree, R] {
-
-    override def rOrdering: Ordering[R] = summon[LinearlyOrderedGroup[R]]
-
-    def oneElementMeasure[A]: Measured[A, R] = new Measured[A, R] {
-      def measure(a: A): R = summon[LinearlyOrderedGroup[R]].one
-    }
-
-    override def empty[A]: ScaledMaxFingerTree[A, R] = {
-      ScaledMaxFingerTree.empty[A, R](using oneElementMeasure, summon[LinearlyOrderedGroup[R]])
-    }
-
-    override def isEmpty[A](queue: ScaledMaxFingerTree[A, R]): Boolean = {
-      queue.isEmpty
-    }
-
-    override def enqueue[A](a: A, priority: R, queue: ScaledMaxFingerTree[A, R]): ScaledMaxFingerTree[A, R] = {
-      queue.prepended(ScaledValue(a, priority))
-    }
-
-    override def dequeue[A](queue: ScaledMaxFingerTree[A, R]): (Option[A], ScaledMaxFingerTree[A, R]) = {
-      queue.dequeueMax
-    }
-
-    override def peek[A](queue: ScaledMaxFingerTree[A, R]): Option[A] = {
-      queue.findMax
-    }
-
-    override def findMaxPriority[A](queue: ScaledMaxFingerTree[A, R]): Option[R] = {
-      if (queue.isEmpty) then None
-      else
-        Some(queue.measure)
-    }
-
-    override def merge[A](x: ScaledMaxFingerTree[A, R], y: ScaledMaxFingerTree[A, R]): ScaledMaxFingerTree[A, R] = {
-      given Measured[A, R] = oneElementMeasure
-
-      concat(x, y)
-    }
-
-    override def scale[A](queue: ScaledMaxFingerTree[A, R], factor: R): ScaledMaxFingerTree[A, R] = {
-      queue.scale(factor)
-    }
-
-  }
-
-  given [R: LinearlyOrderedGroup]: AsScaledPriorityQueue[ScaledMaxFingerTree, R] = AsScaledPriorityQueueImpl[R]
-  */
 }

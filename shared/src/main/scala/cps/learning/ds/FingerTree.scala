@@ -1,7 +1,5 @@
 package cps.learning.ds
 
-import cps.learning.LinearlyOrderedGroup
-
 
 /**
  * Fingdr tree, used as a priiority queue (which is used as CpsScoredMonad).

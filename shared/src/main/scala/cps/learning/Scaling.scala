@@ -1,10 +1,12 @@
 package cps.learning
 
 /**
+ * Multiplicative monoid for scaling factors.
+ * Uses abs-value to keep factors positive when derived from mixed-sign measures.
  *
- *
+ * Note: Does NOT extend Ordering - use standard Ordering[A] for comparing priorities.
  */
-trait LinearlyOrderedMultiplicativeMonoid[A] extends Ordering[A] {
+trait ScalingMonoid[A] {
 
   def combine(x: A, y: A): A
 
@@ -18,27 +20,17 @@ trait LinearlyOrderedMultiplicativeMonoid[A] extends Ordering[A] {
 
   def maxPositiveValue: A
 
-  def maxOf(values: A*): A =
-    if values.isEmpty then
-      minPositiveValue
-    else
-      values.reduce((x, y) => if compare(x, y) >= 0 then x else y)
-
 }
 
 extension [A](x: A)
-  def |*|(y: A)(using lg: LinearlyOrderedMultiplicativeMonoid[A]): A = lg.combine(x, y)
-  def inverse(using lg: LinearlyOrderedGroup[A]): A = lg.inverse(x)
-  def |/|(y: A)(using lg: LinearlyOrderedGroup[A]): A = lg.divide(x, y)
-  infix def max(y: A)(using lg: LinearlyOrderedMultiplicativeMonoid[A]): A =
-    if lg.compare(x, y) >= 0 then x else y
-  infix def min(y: A)(using lg: LinearlyOrderedMultiplicativeMonoid[A]): A =
-    if lg.compare(x, y) <= 0 then x else y
+  def |*|(y: A)(using lg: ScalingMonoid[A]): A = lg.combine(x, y)
+  def inverse(using lg: ScalingGroup[A]): A = lg.inverse(x)
+  def |/|(y: A)(using lg: ScalingGroup[A]): A = lg.divide(x, y)
 
 
-object LinearlyOrderedMultiplicativeMonoid {
+object ScalingMonoid {
 
-  given LinearlyOrderedMultiplicativeMonoid[Int] with {
+  given ScalingMonoid[Int] with {
     def combine(x: Int, y: Int): Int = Math.abs(x) * Math.abs(y)
 
     def one: Int = 1
@@ -46,11 +38,9 @@ object LinearlyOrderedMultiplicativeMonoid {
     def minPositiveValue: Int = 0
 
     def maxPositiveValue: Int = Int.MaxValue
-
-    def compare(x: Int, y: Int): Int = Math.abs(x).compareTo(Math.abs(y))
   }
 
-  given LinearlyOrderedMultiplicativeMonoid[Long] with {
+  given ScalingMonoid[Long] with {
     def combine(x: Long, y: Long): Long = Math.abs(x) * Math.abs(y)
 
     def one: Long = 1L
@@ -58,35 +48,40 @@ object LinearlyOrderedMultiplicativeMonoid {
     def minPositiveValue: Long = 0L
 
     def maxPositiveValue: Long = Long.MaxValue
-
-    def compare(x: Long, y: Long): Int = Math.abs(x).compareTo(Math.abs(y))
   }
-
 
 }
 
 /**
- * Lattice ordered group: adding the inverse
- * see https://ncatlab.org/nlab/show/lattice-ordered+group
+ * Scaling group: adding the inverse (division)
+ * Uses abs-value to keep factors positive.
  *
  * @tparam A
  */
-trait LinearlyOrderedGroup[A] extends LinearlyOrderedMultiplicativeMonoid[A] {
+trait ScalingGroup[A] extends ScalingMonoid[A] {
 
   def divide(x: A, y: A): A
 
   def inverse(x: A): A = divide(one, x)
 
+  /**
+   * Scale a measure by a positive factor.
+   * Unlike combine (|*|), this preserves the sign of the measure.
+   * Use this for measure × factor computations where measure can be negative.
+   */
+  def scaleBy(measure: A, positiveFactor: A): A
+
 }
 
-object LinearlyOrderedGroup {
+object ScalingGroup {
 
-  given LinearlyOrderedGroup[Float] = summon[LinearlyOrderedRing[Float]]
+  given ScalingGroup[Float] = summon[ScalingRing[Float]]
 
+  given ScalingGroup[Double] = summon[ScalingRing[Double]]
 
 }
 
-trait LinearlyOrderedRing[A] extends LinearlyOrderedGroup[A] {
+trait ScalingRing[A] extends ScalingGroup[A] {
 
   def add(x: A, y: A): A
 
@@ -94,9 +89,9 @@ trait LinearlyOrderedRing[A] extends LinearlyOrderedGroup[A] {
 
 }
 
-object LinearlyOrderedRing {
+object ScalingRing {
 
-  given LinearlyOrderedRing[Double] with {
+  given ScalingRing[Double] with {
 
     def combine(x: Double, y: Double): Double = Math.abs(x) * Math.abs(y)
 
@@ -106,13 +101,13 @@ object LinearlyOrderedRing {
       else
         Math.abs(x) / Math.abs(y)
 
+    def scaleBy(measure: Double, positiveFactor: Double): Double = measure * positiveFactor
+
     def one: Double = 1.0
 
     def minPositiveValue: Double = 0.0
 
     def maxPositiveValue: Double = Double.PositiveInfinity
-
-    def compare(x: Double, y: Double): Int = Math.abs(x).compareTo(Math.abs(y))
 
     def add(x: Double, y: Double): Double = x + y
 
@@ -120,7 +115,7 @@ object LinearlyOrderedRing {
 
   }
 
-  given LinearlyOrderedRing[Float] with {
+  given ScalingRing[Float] with {
 
     def combine(x: Float, y: Float): Float = Math.abs(x) * Math.abs(y)
 
@@ -130,18 +125,17 @@ object LinearlyOrderedRing {
       else
         Math.abs(x) / Math.abs(y)
 
+    def scaleBy(measure: Float, positiveFactor: Float): Float = measure * positiveFactor
+
     def one: Float = 1.0f
 
     def minPositiveValue: Float = 0.0f
 
     def maxPositiveValue: Float = Float.PositiveInfinity
 
-    def compare(x: Float, y: Float): Int = Math.abs(x).compareTo(Math.abs(y))
-
     def add(x: Float, y: Float): Float = x + y
 
     override def negate(x: Float): Float = -x
   }
-
 
 }

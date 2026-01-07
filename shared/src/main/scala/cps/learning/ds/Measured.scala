@@ -1,6 +1,6 @@
 package cps.learning.ds
 
-import cps.learning.LinearlyOrderedGroup
+import cps.learning.ScalingGroup
 
 @FunctionalInterface
 trait Measured[A, R] {

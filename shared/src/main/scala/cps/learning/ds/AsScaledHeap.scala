@@ -1,8 +1,8 @@
 package cps.learning.ds
 
-import cps.learning.LinearlyOrderedGroup
+import cps.learning.ScalingGroup
 
-trait AsScaledHeap[H[_, _], R: LinearlyOrderedGroup] {
+trait AsScaledHeap[H[_, _], R: ScalingGroup : Ordering] {
 
   def elementMeasured[A](heap: H[A, R]): Measured[A, R]
 

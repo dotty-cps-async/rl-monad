@@ -47,7 +47,7 @@ trait RLMiniMaxParticipant[F[_], S, O, A, R]:
  * @tparam M Model/agent state (same for both players in symmetric games)
  * @tparam R Score type
  */
-trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R: LinearlyOrderedGroup](
+trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R: ScalingGroup : Ordering](
     modelControl: RLModelControl[F, S, O, A, R, M],
     maxRecursionDepth: Int,
     trainingMode: VirtualStepTrainingMode = VirtualStepTrainingMode.OnCommit
@@ -88,7 +88,8 @@ trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R:
    * Returns result after OUR one step, not after full recursive exploration.
    */
   private def exploreAndApplyAction(env: RLEnvironment[S, O, A], state: S, agentState: AgentBehaviorState, recursionCount: Int): F[(A, RLAgentStepResult[S, AgentBehaviorState])] = {
-    val ordering = summon[LinearlyOrderedGroup[R]]
+    val ordering = summon[Ordering[R]]
+    val factorGroup = summon[ScalingGroup[R]]
     val actionF = rateAndChooseAction(env, state, agentState, AgentRunningMode.Explore)
     rlMonad.flatMap(actionF) { action =>
       val observation = env.observe(state)
@@ -120,7 +121,7 @@ trait RLMiniMaxAgentBehavior[F[_] : CpsScoredLogicMonad.Curry[R], S, O, A, M, R:
                 rlMonad.flatMap(opponentResultF) { opponentResult =>
                   rlMonad.scoredPure((action, RLAgentStepResult.Continued(newState, opponentResult.agentBehaviorState)), gain)
                 }.otherwise(
-                  rlMonad.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), ordering.maxPositiveValue)
+                  rlMonad.scoredPure((action, RLAgentStepResult.Finished(newState, trainedState)), factorGroup.maxPositiveValue)
                 )
               else
                 rlMonad.scoredPure((action, RLAgentStepResult.Continued(newState, trainedState)), gain)
