@@ -89,6 +89,67 @@ trait ScalingRing[A] extends ScalingGroup[A] {
 
 }
 
+/**
+ * Additive scaling group where combine is addition.
+ * Useful for algorithms with additive costs (like Dijkstra's shortest path).
+ *
+ * For costs: use negative values, so higher score = lower cost = better.
+ *   combine(-cost1, -cost2) = -cost1 + -cost2 = -(cost1 + cost2)
+ *
+ * Identity is 0 (additive identity), not 1 (multiplicative identity).
+ */
+trait AdditiveScalingGroup[A] extends ScalingGroup[A] {
+
+  /** Combine via addition */
+  override def combine(x: A, y: A): A = add(x, y)
+
+  /** Additive identity */
+  override def one: A = additiveZero
+
+  def additiveZero: A
+
+  def add(x: A, y: A): A
+
+  def negate(x: A): A
+
+}
+
+object AdditiveScalingGroup {
+
+  given AdditiveScalingGroup[Float] with {
+    def additiveZero: Float = 0.0f
+
+    def add(x: Float, y: Float): Float = x + y
+
+    def negate(x: Float): Float = -x
+
+    def divide(x: Float, y: Float): Float = x - y
+
+    def scaleBy(measure: Float, positiveFactor: Float): Float = measure + positiveFactor
+
+    def minPositiveValue: Float = Float.NegativeInfinity
+
+    def maxPositiveValue: Float = Float.PositiveInfinity
+  }
+
+  given AdditiveScalingGroup[Double] with {
+    def additiveZero: Double = 0.0
+
+    def add(x: Double, y: Double): Double = x + y
+
+    def negate(x: Double): Double = -x
+
+    def divide(x: Double, y: Double): Double = x - y
+
+    def scaleBy(measure: Double, positiveFactor: Double): Double = measure + positiveFactor
+
+    def minPositiveValue: Double = Double.NegativeInfinity
+
+    def maxPositiveValue: Double = Double.PositiveInfinity
+  }
+
+}
+
 object ScalingRing {
 
   given ScalingRing[Double] with {

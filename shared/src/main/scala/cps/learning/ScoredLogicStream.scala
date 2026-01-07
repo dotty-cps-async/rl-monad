@@ -101,11 +101,7 @@ object ScoredLogicStreamT {
     def maxScore: R = score
 
     def scoredMplus(other: => ScoredLogicStreamT[F, A, R], otherScore: R): ScoredLogicStreamT[F, A, R] = {
-      val maxScore = summon[Ordering[R]].compare(score, otherScore) match {
-        case c if c <= 0 => otherScore
-        case _ => score
-      }
-      Queue(asPQ.enqueue(other, otherScore, asPQ.enqueue(this, score, asPQ.empty)), asSSPQ.empty)
+      Queue.empty.enqueue(this, score).enqueue(Suspend(() => other, otherScore), otherScore)
     }
 
     override def merge(other: ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] = {
@@ -405,7 +401,7 @@ object ScoredLogicStreamT {
                 }
               case s@Suspend(thunk, score) =>
                 try
-                  thunk().fsplit.flatMap {
+                  (thunk() |*| score).fsplit.flatMap {  // Apply stored score when expanding
                     case None => Queue(tail, resultPool).fsplit
                     case Some((tryHead, rest)) =>
                       summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
@@ -477,8 +473,8 @@ object ScoredLogicStreamT {
                 summon[CpsTryMonad[F]].pure(Some(Failure(e)))
               case w@WaitF(waited, _) =>
                 summon[CpsTryMonad[F]].flatMap(waited)(_.first)
-              case s@Suspend(thunk, _) =>
-                try thunk().first
+              case s@Suspend(thunk, score) =>
+                try (thunk() |*| score).first  // Apply stored score when expanding
                 catch case NonFatal(e) => summon[CpsTryMonad[F]].pure(Some(Failure(e)))
               case q@Queue(_, _) =>
                 q.first
@@ -529,7 +525,7 @@ object ScoredLogicStreamT {
     override def scoredPure[A](a: A, score: R): ScoredLogicStreamT[F, A, R] = ScoredLogicStreamT.Pure(a, score)
 
     override def mplus[A](a: ScoredLogicStreamT[F, A, R], b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
-      a.scoredMplus(b, summon[ScalingMonoid[R]].one)
+      a.merge(b)
 
     override def scoredMplus[A](a: ScoredLogicStreamT[F, A, R], bScore: R, b: => ScoredLogicStreamT[F, A, R]): ScoredLogicStreamT[F, A, R] =
       a.scoredMplus(b, bScore)

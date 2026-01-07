@@ -25,7 +25,7 @@ class ShortestPathSuite extends FunSuite {
   }
 
   def runShortestPath(graph: GraphDB[String], start: String, end: String): Option[IndexedSeq[String]] = {
-    val stream: ScoredStream[Option[IndexedSeq[String]]] = ShortestPath.shortestPath0(graph, start, end)
+    val stream: ScoredStream[Option[IndexedSeq[String]]] = ShortestPath.shortestPath(graph, start, end)
     stream.first match {
       case Some(Success(result)) => result
       case _ => None
