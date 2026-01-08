@@ -436,7 +436,7 @@ object ScaledMaxFingerTree {
         if (ord.gteq(leftMeasure, treeMeasure)) then
           val digitSplit = splitMaxDigit(prefix)
           ScaledSplit(digitSplit.left.toTree, digitSplit.pivot, deepL(digitSplit.right, middle, suffix))
-        else if (ord.gteq(middleMeasure, treeMeasure)) then
+        else if (!middle.isEmpty && ord.gteq(middleMeasure, treeMeasure)) then
           val middleSplit = splitMax(middle)
           val digitSplit = splitMaxDigit(middleSplit.pivot.toDigit)
           ScaledSplit(deepR(prefix, middleSplit.left, digitSplit.left),

@@ -58,6 +58,8 @@ object ScaledPriorityQueueWithSize {
     override def scale[A](queue: ScaledPriorityQueueWithSize[H, A, R], factor: R): ScaledPriorityQueueWithSize[H, A, R] =
       queue.scale(factor)
 
+    override def size[A](queue: ScaledPriorityQueueWithSize[H, A, R]): Int =
+      queue.size
 
   }
 

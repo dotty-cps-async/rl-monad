@@ -139,6 +139,8 @@ extension [H[_, _], A, R](self: H[A, R])(using pq: AsScaledPriorityQueue[H, R]) 
 
 trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R] {
 
+  def size[A](queue: H[A, R]): Int
+
   type Curry1[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
   type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
 
