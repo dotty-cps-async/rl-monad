@@ -8,3 +8,4 @@ project/project/
 .bloop/
 .bsp/
 .metals/
+shared/src/test/resources/largeEWD.txt
