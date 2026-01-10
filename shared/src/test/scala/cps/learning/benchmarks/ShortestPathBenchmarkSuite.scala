@@ -300,6 +300,84 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     }
   }
 
+  // ============== SimplePairingHeapStreamModule Benchmarks ==============
+
+  def runSimplePairingHeapBenchmark(graph: IntGraphDB, pairs: Seq[(Int, Int)], graphName: String): Seq[BenchmarkResult] = {
+    import SimplePairingHeapStreamModule.given
+
+    type SimplePairingStream[A] = SimplePairingHeapStreamModule.Stream[CpsIdentity, A, Float]
+
+    pairs.map { case (src, dst) =>
+      val startTime = System.currentTimeMillis()
+
+      try {
+        val stream: SimplePairingStream[Option[IndexedSeq[Int]]] =
+          ShortestPath.shortestPath[SimplePairingStream, Int](graph, src, dst)
+
+        val result = stream.first
+        val endTime = System.currentTimeMillis()
+
+        result match {
+          case Some(Success(Some(path))) =>
+            BenchmarkResult("SimplePairingHeap", graphName, (src, dst), true, Some(path.length), endTime - startTime)
+          case Some(Success(None)) =>
+            BenchmarkResult("SimplePairingHeap", graphName, (src, dst), false, None, endTime - startTime)
+          case Some(Failure(e)) =>
+            BenchmarkResult("SimplePairingHeap", graphName, (src, dst), false, None, endTime - startTime, Some(e.getClass.getSimpleName))
+          case None =>
+            BenchmarkResult("SimplePairingHeap", graphName, (src, dst), false, None, endTime - startTime)
+        }
+      } catch {
+        case e: StackOverflowError =>
+          val endTime = System.currentTimeMillis()
+          BenchmarkResult("SimplePairingHeap", graphName, (src, dst), false, None, endTime - startTime, Some("StackOverflow"))
+        case e: Throwable =>
+          val endTime = System.currentTimeMillis()
+          BenchmarkResult("SimplePairingHeap", graphName, (src, dst), false, None, endTime - startTime, Some(e.getClass.getSimpleName))
+      }
+    }
+  }
+
+  // ============== SimplePairingHeapStreamModule with TailRec (stack-safe) ==============
+
+  def runSimplePairingHeapTailRecBenchmark(graph: IntGraphDB, pairs: Seq[(Int, Int)], graphName: String): Seq[BenchmarkResult] = {
+    type TailRecStream[A] = SimplePairingHeapStreamModule.Stream[TailRec, A, Float]
+
+    given SimplePairingHeapStreamModule.StreamMonad[TailRec, Float] =
+      SimplePairingHeapStreamModule.cpsScoredLogicMonad[TailRec, Float]
+
+    pairs.map { case (src, dst) =>
+      val startTime = System.currentTimeMillis()
+
+      try {
+        val stream: TailRecStream[Option[IndexedSeq[Int]]] =
+          ShortestPath.shortestPath[TailRecStream, Int](graph, src, dst)
+
+        val tailRecResult: TailRec[Option[Try[Option[IndexedSeq[Int]]]]] = stream.first
+        val result = tailRecResult.result
+        val endTime = System.currentTimeMillis()
+
+        result match {
+          case Some(Success(Some(path))) =>
+            BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), true, Some(path.length), endTime - startTime)
+          case Some(Success(None)) =>
+            BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), false, None, endTime - startTime)
+          case Some(Failure(e)) =>
+            BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), false, None, endTime - startTime, Some(e.getClass.getSimpleName))
+          case None =>
+            BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), false, None, endTime - startTime)
+        }
+      } catch {
+        case e: StackOverflowError =>
+          val endTime = System.currentTimeMillis()
+          BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), false, None, endTime - startTime, Some("StackOverflow"))
+        case e: Throwable =>
+          val endTime = System.currentTimeMillis()
+          BenchmarkResult("SimplePairingHeap-TailRec", graphName, (src, dst), false, None, endTime - startTime, Some(e.getClass.getSimpleName))
+      }
+    }
+  }
+
   // ============== 1000EWD Benchmarks ==============
 
   test("1000EWD: PairingHeapStreamModule benchmark") {
@@ -326,35 +404,36 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
   }
 
+  test("1000EWD: SimplePairingHeap benchmark") {
+    val results = runSimplePairingHeapBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
+    println("\n" + formatResults(results))
+
+    val totalTime = results.map(_.timeMs).sum
+    val avgTime = totalTime.toDouble / results.length
+    val foundCount = results.count(_.pathFound)
+    val errorCount = results.count(_.error.isDefined)
+    println(f"\nTotal time: ${totalTime}ms, Average: ${avgTime}%.2fms")
+    println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
+  }
+
   test("1000EWD: Compare implementations") {
     val pairingResults = runPairingHeapBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
+    val simplePairingResults = runSimplePairingHeapBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
     val fingerTreeResults = runFingerTreeBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
 
     println("\n=== 1000EWD Comparison ===")
-    println(formatResults(pairingResults ++ fingerTreeResults))
-
-    // Check for differences (different implementations may find different paths of same cost)
-    var diffs = 0
-    for (i <- pairingResults.indices) {
-      val p = pairingResults(i)
-      val f = fingerTreeResults(i)
-      if (p.pathFound != f.pathFound) {
-        println(s"  Note: Path found mismatch for pair ${p.pair}: PairingHeap=${p.pathFound}, FingerTree=${f.pathFound}")
-        diffs += 1
-      } else if (p.pathLength != f.pathLength) {
-        println(s"  Note: Path length differs for pair ${p.pair}: PairingHeap=${p.pathLength}, FingerTree=${f.pathLength}")
-        diffs += 1
-      }
-    }
-    if (diffs > 0) {
-      println(s"  ($diffs differences found - may indicate multiple paths of same cost)")
-    }
+    println(formatResults(pairingResults ++ simplePairingResults ++ fingerTreeResults))
 
     val pairingTotal = pairingResults.map(_.timeMs).sum
+    val simplePairingTotal = simplePairingResults.map(_.timeMs).sum
     val fingerTreeTotal = fingerTreeResults.map(_.timeMs).sum
-    println(f"\nPairingHeap total: ${pairingTotal}ms")
+    println(f"\nBootstrappedPairingHeap total: ${pairingTotal}ms")
+    println(f"SimplePairingHeap total: ${simplePairingTotal}ms")
     println(f"FingerTree total: ${fingerTreeTotal}ms")
-    println(f"Speedup: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    if (pairingTotal > 0) {
+      println(f"SimplePairingHeap vs Bootstrapped: ${pairingTotal.toDouble / simplePairingTotal.toDouble}%.2fx")
+      println(f"FingerTree vs Bootstrapped: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    }
   }
 
   // ============== 10000EWD Benchmarks ==============
@@ -383,35 +462,36 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
   }
 
+  test("10000EWD: SimplePairingHeap benchmark") {
+    val results = runSimplePairingHeapBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
+    println("\n" + formatResults(results))
+
+    val totalTime = results.map(_.timeMs).sum
+    val avgTime = totalTime.toDouble / results.length
+    val foundCount = results.count(_.pathFound)
+    val errorCount = results.count(_.error.isDefined)
+    println(f"\nTotal time: ${totalTime}ms, Average: ${avgTime}%.2fms")
+    println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
+  }
+
   test("10000EWD: Compare implementations") {
     val pairingResults = runPairingHeapBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
+    val simplePairingResults = runSimplePairingHeapBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
     val fingerTreeResults = runFingerTreeBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
 
     println("\n=== 10000EWD Comparison ===")
-    println(formatResults(pairingResults ++ fingerTreeResults))
-
-    // Check for differences (different implementations may find different paths of same cost)
-    var diffs = 0
-    for (i <- pairingResults.indices) {
-      val p = pairingResults(i)
-      val f = fingerTreeResults(i)
-      if (p.pathFound != f.pathFound) {
-        println(s"  Note: Path found mismatch for pair ${p.pair}: PairingHeap=${p.pathFound}, FingerTree=${f.pathFound}")
-        diffs += 1
-      } else if (p.pathLength != f.pathLength) {
-        println(s"  Note: Path length differs for pair ${p.pair}: PairingHeap=${p.pathLength}, FingerTree=${f.pathLength}")
-        diffs += 1
-      }
-    }
-    if (diffs > 0) {
-      println(s"  ($diffs differences found - may indicate multiple paths of same cost)")
-    }
+    println(formatResults(pairingResults ++ simplePairingResults ++ fingerTreeResults))
 
     val pairingTotal = pairingResults.map(_.timeMs).sum
+    val simplePairingTotal = simplePairingResults.map(_.timeMs).sum
     val fingerTreeTotal = fingerTreeResults.map(_.timeMs).sum
-    println(f"\nPairingHeap total: ${pairingTotal}ms")
+    println(f"\nBootstrappedPairingHeap total: ${pairingTotal}ms")
+    println(f"SimplePairingHeap total: ${simplePairingTotal}ms")
     println(f"FingerTree total: ${fingerTreeTotal}ms")
-    println(f"Speedup: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    if (pairingTotal > 0) {
+      println(f"SimplePairingHeap vs Bootstrapped: ${pairingTotal.toDouble / simplePairingTotal.toDouble}%.2fx")
+      println(f"FingerTree vs Bootstrapped: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    }
   }
 
   // ============== largeEWD Benchmarks (optional, may not be available) ==============
@@ -429,6 +509,16 @@ class ShortestPathBenchmarkSuite extends FunSuite {
   test("largeEWD: FingerTreeStreamModule benchmark".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
     val results = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
+    println("\n" + formatResults(results))
+
+    val totalTime = results.map(_.timeMs).sum
+    val avgTime = totalTime.toDouble / results.length
+    println(f"\nTotal time: ${totalTime}ms, Average: ${avgTime}%.2fms")
+  }
+
+  test("largeEWD: SimplePairingHeap benchmark".tag(munit.Slow)) {
+    assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    val results = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
 
     val totalTime = results.map(_.timeMs).sum
@@ -464,53 +554,60 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
   }
 
+  test("largeEWD: SimplePairingHeap-TailRec benchmark (stack-safe)".tag(munit.Slow)) {
+    assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    println("\n=== SimplePairingHeap with TailRec (trampolined) ===")
+    val results = runSimplePairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
+    println("\n" + formatResults(results))
+
+    val totalTime = results.map(_.timeMs).sum
+    val avgTime = totalTime.toDouble / results.length
+    val foundCount = results.count(_.pathFound)
+    val errorCount = results.count(_.error.isDefined)
+    println(f"\nTotal time: ${totalTime}ms, Average: ${avgTime}%.2fms")
+    println(f"Paths found: $foundCount/${results.length}, Errors: $errorCount")
+  }
+
   test("largeEWD: Compare TailRec implementations".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
     println("\n=== largeEWD TailRec Comparison ===")
     val pairingResults = runPairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
+    val simplePairingResults = runSimplePairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     val fingerTreeResults = runFingerTreeTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
 
-    println(formatResults(pairingResults ++ fingerTreeResults))
+    println(formatResults(pairingResults ++ simplePairingResults ++ fingerTreeResults))
 
     val pairingTotal = pairingResults.map(_.timeMs).sum
+    val simplePairingTotal = simplePairingResults.map(_.timeMs).sum
     val fingerTreeTotal = fingerTreeResults.map(_.timeMs).sum
-    println(f"\nPairingHeap-TailRec total: ${pairingTotal}ms")
+    println(f"\nBootstrappedPairingHeap-TailRec total: ${pairingTotal}ms")
+    println(f"SimplePairingHeap-TailRec total: ${simplePairingTotal}ms")
     println(f"FingerTree-TailRec total: ${fingerTreeTotal}ms")
     if (pairingTotal > 0) {
-      println(f"PairingHeap speedup: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+      println(f"SimplePairingHeap vs Bootstrapped: ${pairingTotal.toDouble / simplePairingTotal.toDouble}%.2fx")
+      println(f"FingerTree vs Bootstrapped: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
     }
   }
 
   test("largeEWD: Compare implementations".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
     val pairingResults = runPairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
+    val simplePairingResults = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     val fingerTreeResults = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
 
     println("\n=== largeEWD Comparison ===")
-    println(formatResults(pairingResults ++ fingerTreeResults))
-
-    // Check for differences
-    var diffs = 0
-    for (i <- pairingResults.indices) {
-      val p = pairingResults(i)
-      val f = fingerTreeResults(i)
-      if (p.pathFound != f.pathFound) {
-        println(s"  Note: Path found mismatch for pair ${p.pair}: PairingHeap=${p.pathFound}, FingerTree=${f.pathFound}")
-        diffs += 1
-      } else if (p.pathLength != f.pathLength) {
-        println(s"  Note: Path length differs for pair ${p.pair}: PairingHeap=${p.pathLength}, FingerTree=${f.pathLength}")
-        diffs += 1
-      }
-    }
-    if (diffs > 0) {
-      println(s"  ($diffs differences found)")
-    }
+    println(formatResults(pairingResults ++ simplePairingResults ++ fingerTreeResults))
 
     val pairingTotal = pairingResults.map(_.timeMs).sum
+    val simplePairingTotal = simplePairingResults.map(_.timeMs).sum
     val fingerTreeTotal = fingerTreeResults.map(_.timeMs).sum
-    println(f"\nPairingHeap total: ${pairingTotal}ms")
+    println(f"\nBootstrappedPairingHeap total: ${pairingTotal}ms")
+    println(f"SimplePairingHeap total: ${simplePairingTotal}ms")
     println(f"FingerTree total: ${fingerTreeTotal}ms")
-    println(f"Speedup: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    if (pairingTotal > 0) {
+      println(f"SimplePairingHeap vs Bootstrapped: ${pairingTotal.toDouble / simplePairingTotal.toDouble}%.2fx")
+      println(f"FingerTree vs Bootstrapped: ${fingerTreeTotal.toDouble / pairingTotal.toDouble}%.2fx")
+    }
   }
 
   // ============== Summary Test ==============
@@ -525,21 +622,24 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     // 1000EWD
     println("\n--- 1000EWD (1,000 vertices, 16,866 edges) ---")
     val results1000Pairing = runPairingHeapBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
+    val results1000SimplePairing = runSimplePairingHeapBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
     val results1000Finger = runFingerTreeBenchmark(graph1000, BenchmarkTestPairs.pairs1000EWD, "1000EWD")
-    allResults = allResults ++ results1000Pairing ++ results1000Finger
+    allResults = allResults ++ results1000Pairing ++ results1000SimplePairing ++ results1000Finger
 
     // 10000EWD
     println("--- 10000EWD (10,000 vertices, 123,462 edges) ---")
     val results10000Pairing = runPairingHeapBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
+    val results10000SimplePairing = runSimplePairingHeapBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
     val results10000Finger = runFingerTreeBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
-    allResults = allResults ++ results10000Pairing ++ results10000Finger
+    allResults = allResults ++ results10000Pairing ++ results10000SimplePairing ++ results10000Finger
 
     // largeEWD (if available)
     if (largeEWDExists) {
       println("--- largeEWD (1,000,000 vertices, 15,172,126 edges) ---")
       val resultsLargePairing = runPairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
+      val resultsLargeSimplePairing = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
       val resultsLargeFinger = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
-      allResults = allResults ++ resultsLargePairing ++ resultsLargeFinger
+      allResults = allResults ++ resultsLargePairing ++ resultsLargeSimplePairing ++ resultsLargeFinger
     } else {
       println("--- largeEWD: SKIPPED (file not found) ---")
       println("    Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to include in benchmarks")

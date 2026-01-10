@@ -561,6 +561,9 @@ abstract class ScoredLogicStreamModule[
 type PairingHeapPQ[A, R] = ScaledBootstrappedPairingHeap[(A, R), R]
 type PairingHeapSizedPQ[A, R] = ScaledPriorityQueueWithSize[PairingHeapPQ, A, R]
 
+type SimplePairingHeapPQ[A, R] = ScaledPairingHeap[(A, R), R]
+type SimplePairingHeapSizedPQ[A, R] = ScaledPriorityQueueWithSize[SimplePairingHeapPQ, A, R]
+
 type FingerTreePQ[A, R] = ScaledMaxFingerTree[A, R]
 type FingerTreeSizedPQ[A, R] = ScaledPriorityQueueWithSize[FingerTreePQ, A, R]
 
@@ -598,6 +601,27 @@ object FingerTreeStreamModule extends ScoredLogicStreamModule[
 
   override def asSSPQ[R: ScalingGroup : Ordering]: AsSizedScaledPriorityQueue[FingerTreeSizedPQ, R] =
     summon[AsSizedScaledPriorityQueue[FingerTreeSizedPQ, R]]
+
+  given streamMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]: StreamMonad[F, R] =
+    cpsScoredLogicMonad[F, R]
+
+}
+
+
+/**
+ * Concrete module using simple (non-bootstrapped) PairingHeap-based queues.
+ * Provided for comparison with the bootstrapped version.
+ */
+object SimplePairingHeapStreamModule extends ScoredLogicStreamModule[
+  SimplePairingHeapPQ,
+  SimplePairingHeapSizedPQ
+] {
+
+  override def asPQ[R: ScalingGroup : Ordering]: AsScaledPriorityQueue[SimplePairingHeapPQ, R] =
+    summon[AsScaledPriorityQueue[SimplePairingHeapPQ, R]]
+
+  override def asSSPQ[R: ScalingGroup : Ordering]: AsSizedScaledPriorityQueue[SimplePairingHeapSizedPQ, R] =
+    summon[AsSizedScaledPriorityQueue[SimplePairingHeapSizedPQ, R]]
 
   given streamMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]: StreamMonad[F, R] =
     cpsScoredLogicMonad[F, R]

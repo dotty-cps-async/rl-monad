@@ -1,5 +1,6 @@
 package cps.learning.ds
 
+import scala.annotation.tailrec
 import cps.learning.*
 
 sealed trait ScaledPairingHeap[A: [X] =>> Measured[X, R], R: ScalingGroup : Ordering] {
@@ -68,15 +69,25 @@ object ScaledPairingHeap {
     def findMax: Option[A] = Some(value)
 
     def deletedMax: ScaledPairingHeap[A, R] = {
-      def mergePairs(heaps: List[ScaledPairingHeap[A, R]]): ScaledPairingHeap[A, R] = {
+      // Tail-recursive version of mergePairs to avoid stack overflow
+      // First pass: merge adjacent pairs, accumulate results
+      // Second pass: merge all accumulated heaps
+      @tailrec
+      def mergePairsAcc(heaps: List[ScaledPairingHeap[A, R]], acc: List[ScaledPairingHeap[A, R]]): List[ScaledPairingHeap[A, R]] = {
         heaps match
-          case Nil => Empty()
-          case h1 :: Nil => h1
-          case h1 :: h2 :: rest =>
-            h1.merge(h2).merge(mergePairs(rest))
+          case Nil => acc
+          case h1 :: Nil => h1 :: acc
+          case h1 :: h2 :: rest => mergePairsAcc(rest, h1.merge(h2) :: acc)
       }
 
-      mergePairs(children)
+      @tailrec
+      def mergeAll(heaps: List[ScaledPairingHeap[A, R]], acc: ScaledPairingHeap[A, R]): ScaledPairingHeap[A, R] = {
+        heaps match
+          case Nil => acc
+          case h :: rest => mergeAll(rest, acc.merge(h))
+      }
+
+      mergeAll(mergePairsAcc(children, Nil), Empty())
     }
 
     def scale(factor: R): ScaledPairingHeap[A, R] = {
