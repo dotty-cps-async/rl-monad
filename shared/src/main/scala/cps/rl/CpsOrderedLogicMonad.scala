@@ -1,0 +1,55 @@
+package cps.rl
+
+import cps.*
+import cps.monads.logic.*
+import cps.syntax.*
+
+
+/**
+ * Order the branches of the computation (inside some window) by a scoring function.
+ */
+trait CpsOrderedLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMonad[F] {
+
+  type Context <: CpsOrderedLogicMonadContext[F, R]
+
+  /**
+   * Set ordering for the branches of the computation,
+   * Typpical usage:
+   * ```scala
+   * val alterna = m.orderBy(score, windowLength)
+   * ```
+   */
+  def order[A](m: F[A])(score: A => R, windowLength: Int = CpsOrderedLogicMonad.DEFAULT_WINDOW_LENGTH): F[A]
+
+}
+
+object CpsOrderedLogicMonad {
+
+  type Curry[R] = [F[_]] =>> CpsOrderedLogicMonad[F, R]
+  type WithOrdering[R] = [F[_]] =>> CpsOrderedLogicMonad[F, R]
+
+  val DEFAULT_WINDOW_LENGTH = 100
+
+  given observerConversion[F[_], O[_], R](using monad: CpsOrderedLogicMonad[F, R] {type Observer[X] = O[X]}, rOrdering: Ordering[R]): CpsMonadConversion[O, F] with
+    override def apply[T](ft: O[T]): F[T] = {
+      monad.fromObserver(ft)
+    }
+
+}
+
+extension [F[_] : CpsOrderedLogicMonad.WithOrdering[R], R: Ordering, A](m: F[A]) {
+
+  def orderBy(using monad: CpsOrderedLogicMonad[F, R])(score: A => R, windowLength: Int = CpsOrderedLogicMonad.DEFAULT_WINDOW_LENGTH): F[A] =
+    monad.order(m)(score, windowLength)
+
+}
+
+
+trait CpsOrderedLogicMonadContext[F[_], R: Ordering] extends CpsLogicMonadContext[F] {
+
+  override def monad: CpsOrderedLogicMonad[F, R]
+
+}
+
+type CpsFloatOrderedLogicMonad[F[_]] = CpsOrderedLogicMonad[F, Float]
+type CpsDoubleOrderedLogicMonad[F[_]] = CpsOrderedLogicMonad[F, Double]
