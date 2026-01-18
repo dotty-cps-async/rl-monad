@@ -38,6 +38,12 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     Option(getClass.getClassLoader.getResourceAsStream(resourcePath)).map(_.close()).isDefined
   }
 
+  // Check if we have enough heap memory for largeEWD (needs ~8GB)
+  lazy val hasEnoughMemoryForLargeEWD: Boolean = {
+    val maxHeapMB = Runtime.getRuntime.maxMemory() / 1024 / 1024
+    maxHeapMB >= 7000  // Require at least 7GB
+  }
+
   // largeEWD might not be available in all environments (removed from git due to size)
   // Only load if it exists - loading requires significant heap memory (-Xmx8g recommended)
   lazy val graphLarge: IntGraphDB = {
@@ -498,6 +504,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: PairingHeapStreamModule benchmark".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     val results = runPairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
 
@@ -508,6 +515,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: FingerTreeStreamModule benchmark".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     val results = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
 
@@ -518,6 +526,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: SimplePairingHeap benchmark".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     val results = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
 
@@ -528,6 +537,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: PairingHeap-TailRec benchmark (stack-safe)".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     println("\n=== TailRec (trampolined) evaluation for stack safety ===")
     val results = runPairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
@@ -542,6 +552,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: FingerTree-TailRec benchmark (stack-safe)".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     println("\n=== FingerTree with TailRec (trampolined) ===")
     val results = runFingerTreeTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
@@ -556,6 +567,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: SimplePairingHeap-TailRec benchmark (stack-safe)".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     println("\n=== SimplePairingHeap with TailRec (trampolined) ===")
     val results = runSimplePairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     println("\n" + formatResults(results))
@@ -570,6 +582,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: Compare TailRec implementations".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     println("\n=== largeEWD TailRec Comparison ===")
     val pairingResults = runPairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     val simplePairingResults = runSimplePairingHeapTailRecBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
@@ -591,6 +604,7 @@ class ShortestPathBenchmarkSuite extends FunSuite {
 
   test("largeEWD: Compare implementations".tag(munit.Slow)) {
     assume(largeEWDExists, "largeEWD.txt not found. Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to run this test.")
+    assume(hasEnoughMemoryForLargeEWD, s"Not enough heap memory. Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     val pairingResults = runPairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     val simplePairingResults = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
     val fingerTreeResults = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
@@ -633,16 +647,19 @@ class ShortestPathBenchmarkSuite extends FunSuite {
     val results10000Finger = runFingerTreeBenchmark(graph10000, BenchmarkTestPairs.pairs10000EWD, "10000EWD")
     allResults = allResults ++ results10000Pairing ++ results10000SimplePairing ++ results10000Finger
 
-    // largeEWD (if available)
-    if (largeEWDExists) {
+    // largeEWD (if available and enough memory)
+    if (largeEWDExists && hasEnoughMemoryForLargeEWD) {
       println("--- largeEWD (1,000,000 vertices, 15,172,126 edges) ---")
       val resultsLargePairing = runPairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
       val resultsLargeSimplePairing = runSimplePairingHeapBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
       val resultsLargeFinger = runFingerTreeBenchmark(graphLarge, BenchmarkTestPairs.pairsLargeEWD, "largeEWD")
       allResults = allResults ++ resultsLargePairing ++ resultsLargeSimplePairing ++ resultsLargeFinger
-    } else {
+    } else if (!largeEWDExists) {
       println("--- largeEWD: SKIPPED (file not found) ---")
       println("    Download from https://algs4.cs.princeton.edu/44sp/largeEWD.txt to include in benchmarks")
+    } else {
+      println("--- largeEWD: SKIPPED (not enough heap memory) ---")
+      println(s"    Need at least 7GB, have ${Runtime.getRuntime.maxMemory() / 1024 / 1024}MB. Run with -Xmx8g.")
     }
 
     println("\n" + formatResults(allResults))
