@@ -1,7 +1,7 @@
 package cps.rl.examples.shortestPath
 
 import scala.util.*
-import cps.{learning, *}
+import cps.{rl,*}
 import cps.syntax.*
 import cps.rl.*
 import cps.monads.logic.*
