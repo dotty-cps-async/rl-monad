@@ -83,30 +83,27 @@ object PairingHeap {
   }
 
   def mergePairs[A](children: List[PairingHeap[A]])(using Ordering[A]): PairingHeap[A] = {
-    // Standard pairing heap mergePairs algorithm:
-    // 1. Left-to-right pass: merge adjacent pairs
-    // 2. Right-to-left pass: merge all results together
-
+    // Tail-recursive version of mergePairs to avoid stack overflow
+    // First pass: merge adjacent pairs, accumulate results
+    // Second pass: merge all accumulated heaps
     @annotation.tailrec
-    def pairwiseMerge(heaps: List[PairingHeap[A]], acc: List[PairingHeap[A]]): List[PairingHeap[A]] = {
-      heaps match {
-        case Nil => acc.reverse
-        case h :: Nil => (h :: acc).reverse
-        case h1 :: h2 :: tail => pairwiseMerge(tail, h1.merge(h2) :: acc)
-      }
+    def mergePairsAcc(heaps: List[PairingHeap[A]], acc: List[PairingHeap[A]]): List[PairingHeap[A]] = {
+      heaps match
+        case Nil => acc
+        case h1 :: Nil => h1 :: acc
+        case h1 :: h2 :: rest => mergePairsAcc(rest, h1.merge(h2) :: acc)
     }
 
-    def mergeFromRight(heaps: List[PairingHeap[A]]): PairingHeap[A] = {
-      heaps match {
-        case Nil => Empty()
-        case h :: Nil => h
-        case h :: tail => h.merge(mergeFromRight(tail))
-      }
+    @annotation.tailrec
+    def mergeAll(heaps: List[PairingHeap[A]], acc: PairingHeap[A]): PairingHeap[A] = {
+      heaps match
+        case Nil => acc
+        case h :: rest => mergeAll(rest, acc.merge(h))
     }
 
     children match {
       case Nil => Empty()
-      case _ => mergeFromRight(pairwiseMerge(children, Nil))
+      case _ => mergeAll(mergePairsAcc(children, Nil), Empty())
     }
   }
 

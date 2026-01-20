@@ -9,9 +9,6 @@ import cps.rl.*
 import cps.rl.ds.LogicalSearchPolicy.given
 import cps.rl.examples.shortestPath.{Edge, GraphDB, ShortestPath}
 
-// Import the TailRec CpsTryMonad instance
-import cps.rl.benchmarks.given
-
 /**
  * Benchmark suite for comparing priority queue implementations in the scored logic monad.
  *

@@ -26,7 +26,10 @@ abstract class ScoredLogicStreamModule[
 
   def asSSPQ[R: ScalingGroup : Ordering]: AsSizedScaledPriorityQueue[SPQ, R]
 
-  sealed trait Stream[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy] {
+  sealed trait Stream[F[_], A, R: ScalingGroup : Ordering : LogicalSearchPolicy](
+    using val fm: CpsTryMonad[F],
+    val sop: SuspendableObserverProvider[F]
+  ) {
 
     def applyScore(r: R): Stream[F, A, R]
 
@@ -44,11 +47,41 @@ abstract class ScoredLogicStreamModule[
 
     def flatMapTry[B](f: Try[A] => Stream[F, B, R]): Stream[F, B, R]
 
-    def fsplit: F[Option[(Try[A], Stream[F, A, R])]]
+    /**
+     * Stack-safe lazy version of fsplit.
+     * Takes provider as parameter to ensure consistent path-dependent type.
+     */
+    def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]]
+
+    /**
+     * Split the stream into head and tail.
+     * Delegates to lazyFsplit and runs through the stack-safe interpreter.
+     */
+    def fsplit: F[Option[(Try[A], Stream[F, A, R])]] = {
+      val sp = sop
+      sp.runSuspended(lazyFsplit(using sp))
+    }
 
     def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R]
 
-    def first: F[Option[Try[A]]]
+    /**
+     * Stack-safe lazy version of first.
+     */
+    def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]]
+
+    /**
+     * Get the first/best result.
+     */
+    def first: F[Option[Try[A]]] = {
+      val sp = sop
+      sp.runSuspended(lazyFirst(using sp))
+    }
+
+    /**
+     * Wrap this stream in a Suspend to defer its evaluation.
+     * This provides trampolining to avoid stack overflow on deep recursion.
+     */
+    def suspended: Stream[F, A, R] = Suspend(() => this, summon[ScalingGroup[R]].one)
 
   }
 
@@ -60,7 +93,7 @@ abstract class ScoredLogicStreamModule[
 
   def lsPolicy[R](using lp: LogicalSearchPolicy[R]) = lp
 
-  case class Empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]() extends Stream[F, A, R] {
+  case class Empty[F[_]: CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]() extends Stream[F, A, R] {
 
     def scoredMplus(other: => Stream[F, A, R], otherScore: R): Stream[F, A, R] =
       other.applyScore(otherScore)
@@ -77,19 +110,19 @@ abstract class ScoredLogicStreamModule[
     override def flatMapTry[B](f: Try[A] => Stream[F, B, R]): Stream[F, B, R] =
       Empty()
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] =
-      summon[CpsTryMonad[F]].pure(None)
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] =
+      sp.monad.pure(None)
 
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Pure(None, R.one)
     }
 
-    override def first: F[Option[Try[A]]] =
-      summon[CpsTryMonad[F]].pure(None)
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      sp.monad.pure(None)
 
   }
 
-  case class Pure[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, score: R) extends Stream[F, A, R] {
+  case class Pure[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, score: R) extends Stream[F, A, R] {
 
     def applyScore(r: R): Stream[F, A, R] =
       Pure(value, summon[ScalingGroup[R]].scaleBy(r, score))
@@ -115,32 +148,38 @@ abstract class ScoredLogicStreamModule[
     }
 
     override def flatMap[B](f: A => Stream[F, B, R]): Stream[F, B, R] = {
-      try
-        f(value) |*| score
-      catch
-        case NonFatal(e) => Error(e)
+      // Wrap in Suspend to defer execution and avoid StackOverflow for deep flatMap chains
+      Suspend(() => {
+        try
+          f(value) |*| score
+        catch
+          case NonFatal(e) => Error(e)
+      }, score)
     }
 
     override def flatMapTry[B](f: Try[A] => Stream[F, B, R]): Stream[F, B, R] = {
-      try
-        f(scala.util.Success(value)) |*| score
-      catch
-        case NonFatal(e) => Error(e)
+      // Wrap in Suspend to defer execution and avoid StackOverflow
+      Suspend(() => {
+        try
+          f(scala.util.Success(value)) |*| score
+        catch
+          case NonFatal(e) => Error(e)
+      }, score)
     }
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] =
-      summon[CpsTryMonad[F]].pure(Some((Success(value), Empty())))
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] =
+      sp.monad.pure(Some((Success(value), Empty())))
 
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Pure(Some((Success(value), Empty())), R.one |*| score)
     }
 
-    override def first: F[Option[Try[A]]] =
-      summon[CpsTryMonad[F]].pure(Some(Success(value)))
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      sp.monad.pure(Some(Success(value)))
 
   }
 
-  case class Error[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](error: Throwable) extends Stream[F, A, R] {
+  case class Error[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](error: Throwable) extends Stream[F, A, R] {
 
     def applyScore(r: R): Stream[F, A, R] = this
 
@@ -153,28 +192,31 @@ abstract class ScoredLogicStreamModule[
       this.asInstanceOf[Stream[F, B, R]]
 
     override def flatMapTry[B](f: Try[A] => Stream[F, B, R]): Stream[F, B, R] = {
-      try
-        f(Failure(error))
-      catch
-        case NonFatal(e) => Error(e)
+      // Wrap in Suspend to defer execution and avoid StackOverflow
+      Suspend(() => {
+        try
+          f(Failure(error))
+        catch
+          case NonFatal(e) => Error(e)
+      }, maxScore)
     }
 
     override def merge(other: Stream[F, A, R]): Stream[F, A, R] =
       this
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] =
-      summon[CpsTryMonad[F]].pure(Some((Failure(error), Empty())))
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] =
+      sp.monad.pure(Some((Failure(error), Empty())))
 
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Pure(Some((Failure(error), Empty())), R.one |*| maxScore)
     }
 
-    override def first: F[Option[Try[A]]] =
-      summon[CpsTryMonad[F]].pure(Some(Failure(error)))
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      sp.monad.pure(Some(Failure(error)))
 
   }
 
-  case class WaitF[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](waited: F[Stream[F, A, R]], score: R) extends Stream[F, A, R] {
+  case class WaitF[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](waited: F[Stream[F, A, R]], score: R) extends Stream[F, A, R] {
 
     def applyScore(r: R): Stream[F, A, R] =
       WaitF(waited, summon[ScalingGroup[R]].scaleBy(r, score))
@@ -195,14 +237,9 @@ abstract class ScoredLogicStreamModule[
     override def flatMapTry[B](f: Try[A] => Stream[F, B, R]): Stream[F, B, R] =
       WaitF(summon[CpsTryMonad[F]].flatMap(waited)(s => summon[CpsTryMonad[F]].pure(s.flatMapTry(f))), score)
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] =
-      summon[CpsTryMonad[F]].flatMap(waited) { s =>
-        summon[CpsTryMonad[F]].map(s.fsplit) {
-          case None => None
-          case Some((tryHead, rest)) =>
-            Some((tryHead, rest))
-        }
-      }
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] =
+      // Use flatMap to compose lazyFsplit calls instead of calling .fsplit which triggers runSuspended recursively
+      sp.monad.flatMap(sp.suspend(waited))(_.lazyFsplit)
 
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       WaitF(summon[CpsTryMonad[F]].map(waited) { s =>
@@ -210,12 +247,13 @@ abstract class ScoredLogicStreamModule[
       }, score)
     }
 
-    override def first: F[Option[Try[A]]] =
-      summon[CpsTryMonad[F]].flatMap(waited)(_.first)
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      // Use flatMap to compose lazyFirst calls instead of calling .first which triggers runSuspended recursively
+      sp.monad.flatMap(sp.suspend(waited))(_.lazyFirst)
 
   }
 
-  case class Suspend[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](
+  case class Suspend[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](
                                                                                             thunk: () => Stream[F, A, R], score: R) extends Stream[F, A, R] {
 
     def applyScore(r: R): Stream[F, A, R] =
@@ -247,30 +285,33 @@ abstract class ScoredLogicStreamModule[
           q.enqueue(this, score)
     }
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] =
-      try {
-        thunk().fsplit
-      } catch {
-        case NonFatal(e) =>
-          summon[CpsTryMonad[F]].pure(Some((Failure(e), Empty())))
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] =
+      sp.monad.flatDelay {
+        try {
+          thunk().lazyFsplit
+        } catch {
+          case NonFatal(e) => sp.monad.pure(Some((Failure(e), Empty())))
+        }
       }
 
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Suspend(() => thunk().msplit, score)
     }
 
-    override def first: F[Option[Try[A]]] =
-      try {
-        thunk().first
-      } catch {
-        case NonFatal(e) =>
-          summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      sp.monad.flatDelay {
+        try {
+          thunk().lazyFirst
+        } catch {
+          case NonFatal(e) =>
+            sp.monad.pure(Some(Failure(e)))
+        }
       }
 
   }
 
 
-  case class Queue[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](streams: PQ[Stream[F, A, R], R], resultPool: SPQ[Pure[F, A, R], R]) extends Stream[F, A, R] {
+  case class Queue[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](streams: PQ[Stream[F, A, R], R], resultPool: SPQ[Pure[F, A, R], R]) extends Stream[F, A, R] {
 
     def enqueue(other: Stream[F, A, R], otherScore: R): Queue[F, A, R] = {
       Queue(asPQ.enqueue(other, otherScore, streams), resultPool)
@@ -361,56 +402,77 @@ abstract class ScoredLogicStreamModule[
       }
     }
 
-    override def fsplit: F[Option[(Try[A], Stream[F, A, R])]] = {
+    override def lazyFsplit(using sp: SuspendableObserverProvider[F]): sp.SO[Option[(Try[A], Stream[F, A, R])]] = {
+      val SM = sp.monad
+      val FM = summon[CpsTryMonad[F]]
 
-      def getFromResultPool: F[Option[(Try[A], Stream[F, A, R])]] = {
+      def getFromResultPool(currentStreams: PQ[Stream[F, A, R], R]): sp.SO[Option[(Try[A], Stream[F, A, R])]] = {
         asSSPQ.dequeue(resultPool) match
           case (Some(frs), tailPool) =>
-            summon[CpsTryMonad[F]].pure(Some((Success(frs.value), Queue(streams, tailPool))))
+            SM.pure(Some((Success(frs.value), Queue(currentStreams, tailPool))))
           case (None, _) =>
-            summon[CpsTryMonad[F]].pure(None)
+            SM.pure(None)
       }
 
-      def getFromStream(backupFromResultPool: Boolean): F[Option[(Try[A], Stream[F, A, R])]] = {
-        val (optFrs, tail) = asPQ.dequeue(streams)
-        optFrs match
-          case None =>
-            if backupFromResultPool then
-              getFromResultPool
-            else
-              summon[CpsTryMonad[F]].pure(None)
-          case Some(frs) =>
-            frs match
-              case Empty() =>
-                Queue(tail, resultPool).fsplit
-              case p@Pure(value, score) =>
-                summon[CpsTryMonad[F]].pure(Some((Success(value), Queue(tail, resultPool))))
-              case err@Error(e) =>
-                summon[CpsTryMonad[F]].pure(Some((Failure(e), Queue(tail, resultPool))))
-              case w@WaitF(waited, score) =>
-                waited.flatMap { s =>
-                  s.fsplit
-                }.flatMap {
-                  case None => Queue(tail, resultPool).fsplit
-                  case Some((tryHead, rest)) =>
-                    summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
-                }
-              case s@Suspend(thunk, score) =>
-                try
-                  (thunk() |*| score).fsplit.flatMap {  // Apply stored score when expanding
-                    case None => Queue(tail, resultPool).fsplit
-                    case Some((tryHead, rest)) =>
-                      summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
+      // Iterative version to avoid stack overflow on Empty streams
+      def getFromStream(initialStreams: PQ[Stream[F, A, R], R], backupFromResultPool: Boolean): sp.SO[Option[(Try[A], Stream[F, A, R])]] = {
+        var currentStreams = initialStreams
+
+        // Loop to skip over Empty streams without recursion
+        while (true) {
+          val (optFrs, tail) = asPQ.dequeue(currentStreams)
+          optFrs match
+            case None =>
+              if backupFromResultPool then
+                return getFromResultPool(tail)
+              else
+                return SM.pure(None)
+            case Some(frs) =>
+              frs match
+                case Empty() =>
+                  // Instead of recursive call, continue loop with tail
+                  currentStreams = tail
+                case p@Pure(value, score) =>
+                  return SM.pure(Some((Success(value), Queue(tail, resultPool))))
+                case err@Error(e) =>
+                  return SM.pure(Some((Failure(e), Queue(tail, resultPool))))
+                case w@WaitF(waited, score) =>
+                  val restQueue = Queue(tail, resultPool)
+                  return sp.suspend {
+                    FM.flatMap(waited) { s =>
+                      FM.flatMap(s.fsplit) {
+                        case None => restQueue.fsplit
+                        case Some((tryHead, rest)) =>
+                          FM.pure(Some((tryHead, rest.merge(restQueue))))
+                      }
+                    }
                   }
-                catch
-                  case NonFatal(e) =>
-                    summon[CpsTryMonad[F]].pure(Some((Failure(e), Queue(tail, resultPool))))
-              case q@Queue(_, _) =>
-                summon[CpsTryMonad[F]].flatMap(q.fsplit) {
-                  case None => Queue(tail, resultPool).fsplit
-                  case Some((tryHead, rest)) =>
-                    summon[CpsTryMonad[F]].pure(Some((tryHead, rest.merge(Queue(tail, resultPool)))))
-                }
+                case s@Suspend(thunk, score) =>
+                  val restQueue = Queue(tail, resultPool)
+                  return SM.flatDelay {
+                    try {
+                      SM.flatMap((thunk() |*| score).lazyFsplit) {
+                        case None => restQueue.lazyFsplit
+                        case Some((tryHead, rest)) =>
+                          SM.pure(Some((tryHead, rest.merge(restQueue))))
+                      }
+                    } catch {
+                      case NonFatal(e) =>
+                        SM.pure(Some((Failure(e), restQueue)))
+                    }
+                  }
+                case q@Queue(_, _) =>
+                  val restQueue = Queue(tail, resultPool)
+                  return SM.flatDelay {
+                    SM.flatMap(q.lazyFsplit) {
+                      case None => restQueue.lazyFsplit
+                      case Some((tryHead, rest)) =>
+                        SM.pure(Some((tryHead, rest.merge(restQueue))))
+                    }
+                  }
+        }
+        // Unreachable, but needed for type checker
+        SM.pure(None)
       }
 
 
@@ -419,16 +481,16 @@ abstract class ScoredLogicStreamModule[
           asPQ.findMaxPriority(streams) match {
             case Some(streamsPriority) =>
               if (summon[Ordering[R]].gteq(resultPoolPriority, streamsPriority)) then
-                getFromResultPool
+                getFromResultPool(streams)
               else if lsPolicy.maxSuboptimalResultPool > 0 && asSSPQ.size(resultPool) >= lsPolicy.maxSuboptimalResultPool then
-                getFromResultPool
+                getFromResultPool(streams)
               else
-                getFromStream(backupFromResultPool = true)
+                getFromStream(streams, backupFromResultPool = true)
             case None =>
-              getFromResultPool
+              getFromResultPool(streams)
           }
         case None =>
-          getFromStream(backupFromResultPool = false)
+          getFromStream(streams, backupFromResultPool = false)
       }
     }
 
@@ -439,37 +501,48 @@ abstract class ScoredLogicStreamModule[
       WaitF(fStream, R.one)
     }
 
-    override def first: F[Option[Try[A]]] = {
-      def getFromResultPool: F[Option[Try[A]]] = {
+    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] = {
+      val SM = sp.monad
+
+      def getFromResultPool: sp.SO[Option[Try[A]]] = {
         asSSPQ.dequeue(resultPool) match
           case (Some(frs), _) =>
-            summon[CpsTryMonad[F]].pure(Some(Success(frs.value)))
+            SM.pure(Some(Success(frs.value)))
           case (None, _) =>
-            summon[CpsTryMonad[F]].pure(None)
+            SM.pure(None)
       }
 
-      def getFromStream(backupFromResultPool: Boolean): F[Option[Try[A]]] = {
+      def getFromStream(backupFromResultPool: Boolean): sp.SO[Option[Try[A]]] = {
         val (optFrs, _) = asPQ.dequeue(streams)  // discard tail
         optFrs match
           case None =>
             if backupFromResultPool then getFromResultPool
-            else summon[CpsTryMonad[F]].pure(None)
+            else SM.pure(None)
           case Some(frs) =>
             frs match
               case Empty() =>
                 // Recursively try next element - but we've discarded the tail, so just return None
-                summon[CpsTryMonad[F]].pure(None)
+                SM.pure(None)
               case p@Pure(value, _) =>
-                summon[CpsTryMonad[F]].pure(Some(Success(value)))
+                SM.pure(Some(Success(value)))
               case err@Error(e) =>
-                summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+                SM.pure(Some(Failure(e)))
               case w@WaitF(waited, _) =>
-                summon[CpsTryMonad[F]].flatMap(waited)(_.first)
+                sp.suspend {
+                  summon[CpsTryMonad[F]].flatMap(waited)(_.first)
+                }
               case s@Suspend(thunk, score) =>
-                try (thunk() |*| score).first  // Apply stored score when expanding
-                catch case NonFatal(e) => summon[CpsTryMonad[F]].pure(Some(Failure(e)))
+                SM.flatDelay {
+                  try {
+                    (thunk() |*| score).lazyFirst
+                  } catch {
+                    case NonFatal(e) => SM.pure(Some(Failure(e)))
+                  }
+                }
               case q@Queue(_, _) =>
-                q.first
+                SM.flatDelay {
+                  q.lazyFirst
+                }
       }
 
       asSSPQ.findMaxPriority(resultPool) match {
@@ -491,22 +564,34 @@ abstract class ScoredLogicStreamModule[
   }
 
   object Queue {
-    def empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: Queue[F, A, R] =
+    def empty[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: Queue[F, A, R] =
       Queue(asPQ.empty, asSSPQ.empty)
   }
 
 
-  def empty[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: Stream[F, A, R] = Empty()
+  def empty[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy]: Stream[F, A, R] = Empty()
 
-  def singleton[F[_] : CpsTryMonad, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, priority: R): Stream[F, A, R] =
+  def singleton[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](value: A, priority: R): Stream[F, A, R] =
     Pure(value, priority)
 
-  class StreamMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]
-    extends CpsScoredLogicMonadInstanceContext[[A] =>> Stream[F, A, R], R] {
+  class StreamMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy](
+    using val soProvider: SuspendableObserverProvider[F]
+  ) extends CpsScoredLogicMonadInstanceContext[[A] =>> Stream[F, A, R], R] {
 
     override type Observer[A] = F[A]
 
     override val observerCpsMonad: CpsTryMonad[F] = summon[CpsTryMonad[F]]
+
+    override type SuspendableObserver[X] = soProvider.SO[X]
+
+    override def suspendableMonad: CpsTryEffectMonad[SuspendableObserver] =
+      soProvider.monad
+
+    override def runSuspended[A](sa: soProvider.SO[A]): F[A] =
+      soProvider.runSuspended(sa)
+
+    override def suspendInObserver[A](oa: => F[A]): soProvider.SO[A] =
+      soProvider.suspend(oa)
 
     override def pure[T](t: T): Stream[F, T, R] = Pure(t, summon[ScalingMonoid[R]].one)
 
@@ -548,7 +633,7 @@ abstract class ScoredLogicStreamModule[
   }
 
 
-  def cpsScoredLogicMonad[F[_] : CpsTryMonad, R: ScalingGroup : Ordering : LogicalSearchPolicy]: StreamMonad[F, R] =
+  def cpsScoredLogicMonad[F[_] : CpsTryMonad : SuspendableObserverProvider, R: ScalingGroup : Ordering : LogicalSearchPolicy]: StreamMonad[F, R] =
     new StreamMonad[F, R]
 
 

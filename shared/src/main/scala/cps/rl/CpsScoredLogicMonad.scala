@@ -1,5 +1,6 @@
 package cps.rl
 
+import cps.*
 import cps.rl.ds.AsScaledPriorityQueue
 import cps.monads.logic.*
 
@@ -12,6 +13,28 @@ import cps.monads.logic.*
 trait CpsScoredLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMonad[F] {
 
   type Context <: CpsScoredLogicMonadContext[F, R]
+
+  /**
+   * SuspendableObserver provides stack-safe deferred evaluation for the Observer monad.
+   * For effect monads (with delay), this is just Observer[X].
+   * For non-effect monads (like CpsIdentity), this is LazyT[Observer, X].
+   */
+  type SuspendableObserver[X]
+
+  /**
+   * Effect monad instance for SuspendableObserver, providing delay/flatDelay.
+   */
+  def suspendableMonad: CpsTryEffectMonad[SuspendableObserver]
+
+  /**
+   * Run a SuspendableObserver to get the actual Observer result.
+   */
+  def runSuspended[A](sa: SuspendableObserver[A]): Observer[A]
+
+  /**
+   * Create a delayed/suspended computation in SuspendableObserver.
+   */
+  def suspendInObserver[A](oa: => Observer[A]): SuspendableObserver[A]
 
   /**
    * Create a pure value with a score.
@@ -30,6 +53,14 @@ trait CpsScoredLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMona
     m.foldLeft(empty[A]) { case (acc, (score, next)) =>
       scoredMplus(acc, score, next())
     }
+
+  /**
+   * Wrap a computation in a Suspend to defer its evaluation.
+   * This provides trampolining to avoid stack overflow on deep recursion.
+   * Default implementation uses multiScore with a single option.
+   */
+  def suspended[A](f: => F[A]): F[A] =
+    multiScore(Seq((summon[ScalingGroup[R]].one, () => f)))
 
   /**
    * Get the first/best result without creating continuation structures.

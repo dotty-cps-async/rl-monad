@@ -59,14 +59,22 @@ object ShortestPath {
     /**
      * Dijkstra's algorithm using the monad's priority queue.
      * msplit returns the best (highest score = lowest cost) entry.
+     *
+     * Recursive calls are wrapped in Suspend (via multiScore) to avoid
+     * stack overflow - this provides trampolining through the stream's
+     * evaluation mechanism.
      */
     def dijkstra(frontier: F[Entry], settled: Set[N]): F[Option[IndexedSeq[N]]] = {
+      // Helper to wrap recursive call in Suspend for stack safety
+      def suspended(f: => F[Option[IndexedSeq[N]]]): F[Option[IndexedSeq[N]]] =
+        F.multiScore(Seq((summon[ScalingGroup[Float]].one, () => f)))
+
       F.flatMap(F.msplit(frontier)) {
         case None => F.pure(None)
         case Some((scala.util.Failure(e), _)) => F.error(e)
         case Some((scala.util.Success(entry), rest)) =>
           if (settled.contains(entry.node)) {
-            dijkstra(rest, settled)
+            suspended(dijkstra(rest, settled))
           } else if (entry.node == end) {
             F.pure(Some(entry.path))
           } else {
@@ -74,7 +82,7 @@ object ShortestPath {
             val expanded = expand(entry, newSettled)
             // mplus merges preserving internal priorities
             val newFrontier = F.mplus(expanded, rest)
-            dijkstra(newFrontier, newSettled)
+            suspended(dijkstra(newFrontier, newSettled))
           }
       }
     }
