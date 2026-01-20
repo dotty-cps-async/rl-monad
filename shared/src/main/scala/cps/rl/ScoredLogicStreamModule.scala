@@ -66,8 +66,10 @@ abstract class ScoredLogicStreamModule[
 
     /**
      * Stack-safe lazy version of first.
+     * Defined via lazyFsplit - benchmarks showed no performance benefit from separate implementations.
      */
-    def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]]
+    def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
+      sp.monad.map(lazyFsplit)(_.map(_._1))
 
     /**
      * Get the first/best result.
@@ -116,9 +118,6 @@ abstract class ScoredLogicStreamModule[
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Pure(None, R.one)
     }
-
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
-      sp.monad.pure(None)
 
   }
 
@@ -174,9 +173,6 @@ abstract class ScoredLogicStreamModule[
       Pure(Some((Success(value), Empty())), R.one |*| score)
     }
 
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
-      sp.monad.pure(Some(Success(value)))
-
   }
 
   case class Error[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](error: Throwable) extends Stream[F, A, R] {
@@ -211,9 +207,6 @@ abstract class ScoredLogicStreamModule[
       Pure(Some((Failure(error), Empty())), R.one |*| maxScore)
     }
 
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
-      sp.monad.pure(Some(Failure(error)))
-
   }
 
   case class WaitF[F[_] : CpsTryMonad : SuspendableObserverProvider, A, R: ScalingGroup : Ordering : LogicalSearchPolicy](waited: F[Stream[F, A, R]], score: R) extends Stream[F, A, R] {
@@ -246,10 +239,6 @@ abstract class ScoredLogicStreamModule[
         s.msplit
       }, score)
     }
-
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
-      // Use flatMap to compose lazyFirst calls instead of calling .first which triggers runSuspended recursively
-      sp.monad.flatMap(sp.suspend(waited))(_.lazyFirst)
 
   }
 
@@ -297,16 +286,6 @@ abstract class ScoredLogicStreamModule[
     override def msplit: Stream[F, Option[(Try[A], Stream[F, A, R])], R] = {
       Suspend(() => thunk().msplit, score)
     }
-
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] =
-      sp.monad.flatDelay {
-        try {
-          thunk().lazyFirst
-        } catch {
-          case NonFatal(e) =>
-            sp.monad.pure(Some(Failure(e)))
-        }
-      }
 
   }
 
@@ -499,66 +478,6 @@ abstract class ScoredLogicStreamModule[
         singleton(_, R.one)
       }
       WaitF(fStream, R.one)
-    }
-
-    override def lazyFirst(using sp: SuspendableObserverProvider[F]): sp.SO[Option[Try[A]]] = {
-      val SM = sp.monad
-
-      def getFromResultPool: sp.SO[Option[Try[A]]] = {
-        asSSPQ.dequeue(resultPool) match
-          case (Some(frs), _) =>
-            SM.pure(Some(Success(frs.value)))
-          case (None, _) =>
-            SM.pure(None)
-      }
-
-      def getFromStream(backupFromResultPool: Boolean): sp.SO[Option[Try[A]]] = {
-        val (optFrs, _) = asPQ.dequeue(streams)  // discard tail
-        optFrs match
-          case None =>
-            if backupFromResultPool then getFromResultPool
-            else SM.pure(None)
-          case Some(frs) =>
-            frs match
-              case Empty() =>
-                // Recursively try next element - but we've discarded the tail, so just return None
-                SM.pure(None)
-              case p@Pure(value, _) =>
-                SM.pure(Some(Success(value)))
-              case err@Error(e) =>
-                SM.pure(Some(Failure(e)))
-              case w@WaitF(waited, _) =>
-                sp.suspend {
-                  summon[CpsTryMonad[F]].flatMap(waited)(_.first)
-                }
-              case s@Suspend(thunk, score) =>
-                SM.flatDelay {
-                  try {
-                    (thunk() |*| score).lazyFirst
-                  } catch {
-                    case NonFatal(e) => SM.pure(Some(Failure(e)))
-                  }
-                }
-              case q@Queue(_, _) =>
-                SM.flatDelay {
-                  q.lazyFirst
-                }
-      }
-
-      asSSPQ.findMaxPriority(resultPool) match {
-        case Some(resultPoolPriority) =>
-          asPQ.findMaxPriority(streams) match {
-            case Some(streamsPriority) =>
-              if summon[Ordering[R]].gteq(resultPoolPriority, streamsPriority) then
-                getFromResultPool
-              else
-                getFromStream(backupFromResultPool = true)
-            case None =>
-              getFromResultPool
-          }
-        case None =>
-          getFromStream(backupFromResultPool = false)
-      }
     }
 
   }
