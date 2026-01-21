@@ -29,10 +29,6 @@ object AsScaledPriorityQueue {
 
   type Curry[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
 
-  type Curry1[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
-  type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
-
-
   given heapAsScaledPriorityQueue[H[_, _], R](using H: AsScaledHeap[H, R], FG: ScalingGroup[R], ord: Ordering[R]): AsScaledPriorityQueue[[A, R1] =>> H[(A, R1), R1], R] with {
 
 
@@ -140,9 +136,6 @@ extension [H[_, _], A, R](self: H[A, R])(using pq: AsScaledPriorityQueue[H, R]) 
 trait AsSizedScaledPriorityQueue[H[_, _], R] extends AsScaledPriorityQueue[H, R] {
 
   def size[A](queue: H[A, R]): Int
-
-  type Curry1[R] = [H[_, _]] =>> AsScaledPriorityQueue[H, R]
-  type Curry2[H[_, _]] = [R] =>> AsScaledPriorityQueue[H, R]
 
   given heapAsSizedScaledPriorityQueue[H[_, _], R](using heap: AsScaledHeap[H, R], FG: ScalingGroup[R], ord: Ordering[R]): AsScaledPriorityQueue[[A1, R1] =>> HeapPairWithSize[H, A1, R1], R] with {
 

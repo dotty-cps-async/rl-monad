@@ -4,7 +4,7 @@ import scala.util.Try
 import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 import cps.*
-import cps.syntax.{flatMap, map}
+import cps.syntax.map
 import cps.rl.ds.*
 import cps.rl.ds.MinMax.given
 
@@ -554,9 +554,6 @@ abstract class ScoredLogicStreamModule[
 
   def cpsScoredLogicMonad[F[_] : CpsTryMonad : SuspendableObserverProvider, R: ScalingGroup : Ordering : LogicalSearchPolicy]: StreamMonad[F, R] =
     new StreamMonad[F, R]
-
-
-  private def LM[F[_] : CpsTryMonad, R: ScalingGroup : Ordering](using lm: StreamMonad[F, R]): StreamMonad[F, R] = lm
 
 }
 

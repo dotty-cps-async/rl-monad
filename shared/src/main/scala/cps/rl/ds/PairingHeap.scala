@@ -67,11 +67,6 @@ object PairingHeap {
       mergePairs(children)
     }
 
-    def dequeuMax: (Option[A], PairingHeap[A]) = {
-      (Some(value), mergePairs(children))
-    }
-
-
   }
 
   def empty[A](using Ordering[A]): PairingHeap[A] = Empty()

@@ -1,7 +1,6 @@
 package cps.rl
 
 import cps.*
-import cps.rl.ds.AsScaledPriorityQueue
 import cps.monads.logic.*
 
 

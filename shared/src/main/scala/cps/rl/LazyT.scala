@@ -122,19 +122,6 @@ object LazyT {
     FM.tailRecM[State, A]((lt.asInstanceOf[LazyT[F, Any]], Nil))(step)
   }
 
-  /** Helper to apply remaining stack to a LazyT value */
-  private def applyStack[F[_]](
-    lt: LazyT[F, Any],
-    stack: List[Either[Any => LazyT[F, Any], Try[Any] => LazyT[F, Any]]]
-  ): LazyT[F, Any] = {
-    stack.foldRight(lt) { (cont, acc) =>
-      cont match {
-        case Left(f) => FlatMap(acc, f)
-        case Right(f) => FlatMapTry(acc, f)
-      }
-    }
-  }
-
   /**
    * CpsTryEffectMonad instance for LazyT[F, _].
    * This provides delay/flatDelay for deferred evaluation.
