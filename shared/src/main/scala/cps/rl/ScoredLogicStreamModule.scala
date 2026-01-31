@@ -5,6 +5,7 @@ import scala.util.{Failure, Success}
 import scala.util.control.NonFatal
 import cps.*
 import cps.syntax.map
+import cps.monads.logic.SuspendableObserverProvider
 import cps.rl.ds.*
 import cps.rl.ds.MinMax.given
 

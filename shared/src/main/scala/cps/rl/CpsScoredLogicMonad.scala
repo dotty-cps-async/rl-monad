@@ -16,7 +16,7 @@ trait CpsScoredLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMona
   /**
    * SuspendableObserver provides stack-safe deferred evaluation for the Observer monad.
    * For effect monads (with delay), this is just Observer[X].
-   * For non-effect monads (like CpsIdentity), this is LazyT[Observer, X].
+   * For non-effect monads (like CpsIdentity), this is CpsLazyT[Observer, X].
    */
   type SuspendableObserver[X]
 
