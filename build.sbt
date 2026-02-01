@@ -1,6 +1,6 @@
 
 
-val dottyCpsAsyncVersion = "1.3.0-SNAPSHOT"
+val dottyCpsAsyncVersion = "1.3.0"
 
 
 lazy val rlLogic = crossProject(JSPlatform, JVMPlatform, NativePlatform)
