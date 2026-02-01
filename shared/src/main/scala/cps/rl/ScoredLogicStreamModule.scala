@@ -502,17 +502,6 @@ abstract class ScoredLogicStreamModule[
 
     override val observerCpsMonad: CpsTryMonad[F] = summon[CpsTryMonad[F]]
 
-    override type SuspendableObserver[X] = soProvider.SO[X]
-
-    override def suspendableMonad: CpsTryEffectMonad[SuspendableObserver] =
-      soProvider.monad
-
-    override def runSuspended[A](sa: soProvider.SO[A]): F[A] =
-      soProvider.runSuspended(sa)
-
-    override def suspendInObserver[A](oa: => F[A]): soProvider.SO[A] =
-      soProvider.suspend(oa)
-
     override def pure[T](t: T): Stream[F, T, R] = Pure(t, summon[ScalingMonoid[R]].one)
 
     override def error[T](e: Throwable): Stream[F, T, R] = Error(e)

@@ -14,28 +14,6 @@ trait CpsScoredLogicMonad[F[_], R: ScalingGroup : Ordering] extends CpsLogicMona
   type Context <: CpsScoredLogicMonadContext[F, R]
 
   /**
-   * SuspendableObserver provides stack-safe deferred evaluation for the Observer monad.
-   * For effect monads (with delay), this is just Observer[X].
-   * For non-effect monads (like CpsIdentity), this is CpsLazyT[Observer, X].
-   */
-  type SuspendableObserver[X]
-
-  /**
-   * Effect monad instance for SuspendableObserver, providing delay/flatDelay.
-   */
-  def suspendableMonad: CpsTryEffectMonad[SuspendableObserver]
-
-  /**
-   * Run a SuspendableObserver to get the actual Observer result.
-   */
-  def runSuspended[A](sa: SuspendableObserver[A]): Observer[A]
-
-  /**
-   * Create a delayed/suspended computation in SuspendableObserver.
-   */
-  def suspendInObserver[A](oa: => Observer[A]): SuspendableObserver[A]
-
-  /**
    * Create a pure value with a score.
    */
   def scoredPure[A](a: A, score: R): F[A]
