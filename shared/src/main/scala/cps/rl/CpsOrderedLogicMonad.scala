@@ -2,7 +2,6 @@ package cps.rl
 
 import cps.*
 import cps.monads.logic.*
-import cps.syntax.*
 
 
 /**

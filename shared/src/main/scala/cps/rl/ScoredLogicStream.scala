@@ -1,6 +1,5 @@
 package cps.rl
 
-import scala.util.Try
 import cps.*
 import cps.monads.logic.SuspendableObserverProvider
 import cps.rl.ds.*

@@ -71,9 +71,6 @@ sealed trait ScaledMaxFingerTree[A: Measured.Curry1[R], R: ScalingGroup : Orderi
 
 object ScaledMaxFingerTree {
 
-  // Helper for max using Ordering
-  private def maxOf[R: Ordering](values: R*): R = values.max
-
   given scaledMeasured[A, R](using Measured[A, R], ScalingGroup[R]): Measured[ScaledValue[A, R], R] with {
     def measure(value: ScaledValue[A, R]): R =
       summon[ScalingGroup[R]].scaleBy(summon[Measured[A, R]].measure(value.value), value.factor)
@@ -326,9 +323,6 @@ object ScaledMaxFingerTree {
   }
 
   def empty[A, R](using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] = Empty()
-
-  def singleton[A, R](value: A)(using m: Measured[A, R], rG: ScalingGroup[R], ord: Ordering[R]): ScaledMaxFingerTree[A, R] =
-    Single(ScaledValue(value, rG.one))
 
   case class Split[F[_], A](left: F[A], pivot: A, right: F[A])
 

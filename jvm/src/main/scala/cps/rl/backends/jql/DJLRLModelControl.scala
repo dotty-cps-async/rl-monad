@@ -42,21 +42,6 @@ case class DJRLModelState[O, A](
 }
 
 /**
- * Type alias for TensorRepresentation with NDArray tensor type
- */
-type NDArrayTensorRepresentation[A] = TensorRepresentation[A] { type Tensor = NDArray }
-
-/**
- * Type alias for scoped TensorRepresentation with NDArray tensor type
- */
-type ScopedNDArrayRepresentation[A] = ScopedTensorRepresentation[A, NDManager] { type Tensor = NDArray }
-
-/**
- * Type alias for batchable TensorRepresentation with NDArray tensor type
- */
-type BatchableNDArrayRepresentation[A] = BatchableTensorRepresentation[A, NDManager] { type Tensor = NDArray }
-
-/**
  * Local model, which is running locally via DJL.
  * Uses scoped tensor representation for automatic memory management.
  */

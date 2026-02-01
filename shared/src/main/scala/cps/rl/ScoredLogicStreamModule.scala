@@ -80,12 +80,6 @@ abstract class ScoredLogicStreamModule[
       sp.runSuspended(lazyFirst(using sp))
     }
 
-    /**
-     * Wrap this stream in a Suspend to defer its evaluation.
-     * This provides trampolining to avoid stack overflow on deep recursion.
-     */
-    def suspended: Stream[F, A, R] = Suspend(() => this, summon[ScalingGroup[R]].one)
-
   }
 
   def R[R](using ScalingMonoid[R]) = summon[ScalingMonoid[R]]
