@@ -6,8 +6,8 @@ ThisBuild / organizationHomepage := Some(url("https://github.com/dotty-cps-async
 
 ThisBuild / scmInfo := Some(
        ScmInfo(
-          url("https://github.com/dotty-cps-async/rl-monad"),
-          "scm:git@github.com:dotty-cps-async/rl-monad.git"
+          url("https://github.com/dotty-cps-async/rl-logic"),
+          "scm:git@github.com:dotty-cps-async/rl-logic.git"
        )
 )
 
@@ -22,7 +22,7 @@ ThisBuild / developers := List(
 
 ThisBuild / description := "monad for reinforcement learning"
 ThisBuild / licenses := List("Apache 2" -> url("http://www.apache.org/licenses/LICENSE-2.0.txt"))
-ThisBuild / homepage := Some(url("https://github.com/dotty-cps-async/rl-monad"))
+ThisBuild / homepage := Some(url("https://github.com/dotty-cps-async/rl-logic"))
 
 ThisBuild / pomIncludeRepository := { _ => false }
 ThisBuild / publishMavenStyle := true
