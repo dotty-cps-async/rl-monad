@@ -1,6 +1,7 @@
 
 ThisBuild / version := "0.1.0"
 ThisBuild / versionScheme := Some("semver-spec")
+ThisBuild / scalaVersion := "3.3.7"
 ThisBuild / publishTo := localStaging.value
 
 val dottyCpsAsyncVersion = "1.3.0"
@@ -9,7 +10,6 @@ val dottyCpsAsyncVersion = "1.3.0"
 lazy val rlLogic = crossProject(JSPlatform, JVMPlatform, NativePlatform)
   .in(file("."))
   .settings(
-    scalaVersion := "3.3.7",
     name := "rl-logic",
     libraryDependencies += "io.github.dotty-cps-async" %%% "dotty-cps-async" % dottyCpsAsyncVersion,
     libraryDependencies += "io.github.dotty-cps-async" %%% "dotty-cps-async-logic" % dottyCpsAsyncVersion,

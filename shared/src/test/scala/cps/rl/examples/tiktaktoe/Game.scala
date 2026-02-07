@@ -31,7 +31,7 @@ class TikTakToeGame(boardSize: Int, n: Int) extends RLEnvironment[GameState, Gam
   def flipPlayer(i: Int): Int =
     if (i == 1) 2 else 1
 
-  def possibleActions[F[_] : CpsFloatOrderedLogicMonad](state: GameState): F[Move] = {
+  def possibleActions[F[_] : CpsFloatScoredLogicMonad](state: GameState): F[Move] = {
     val moves = for {
       i <- 0 until boardSize
       j <- 0 until boardSize
