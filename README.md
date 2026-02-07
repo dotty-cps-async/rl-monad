@@ -10,7 +10,7 @@ import cps.rl.*
 
 ## Features
 
-- **Scored Logic Monad** - Monadic abstraction for weighted search with scores (`CpsScoredLogicMonad`, `CpsOrderedLogicMonad`)
+- **Scored Logic Monad** - Monadic abstraction for weighted search with scores (`CpsScoredLogicMonad`)
 - **RL Abstractions** - Core traits for environments, agents, and models (`RLEnvironment`, `RLAgentBehavior`, `RLModelControl`)
 - **Tensor Support** - Type-safe tensor operations with scope management (`TensorType`, `TensorScope`, `TensorRepresentation`)
 - **Priority Queue Data Structures** - Efficient heap implementations including `PairingHeap`, `FingerTree`, and scaled variants
