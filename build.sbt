@@ -1,4 +1,7 @@
 
+ThisBuild / version := "0.1.0-SNAPSHOT"
+ThisBuild / versionScheme := Some("semver-spec")
+ThisBuild / publishTo := localStaging.value
 
 val dottyCpsAsyncVersion = "1.3.0"
 
