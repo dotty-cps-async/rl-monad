@@ -27,7 +27,7 @@ libraryDependencies += "io.github.dotty-cps-async" %%% "rl-logic" % "<version>"
 ## Dependencies
 
 - Scala 3.3.7+
-- [dotty-cps-async](https://github.com/rssh/dotty-cps-async) 1.2.0
+- [dotty-cps-async](https://github.com/rssh/dotty-cps-async) 1.3.0
 - [DJL (Deep Java Library)](https://djl.ai/) for neural network support (JVM only)
 
 ## License
