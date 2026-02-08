@@ -6,8 +6,15 @@ ThisBuild / publishTo := localStaging.value
 
 val dottyCpsAsyncVersion = "1.3.0"
 
+lazy val root = project.in(file("."))
+  .aggregate(rlLogic.jvm, rlLogic.js, rlLogic.native)
+  .settings(
+    publishArtifact := false,
+    publish / skip := true,
+  )
 
 lazy val rlLogic = crossProject(JSPlatform, JVMPlatform, NativePlatform)
+  .crossType(CrossType.Full)
   .in(file("."))
   .settings(
     name := "rl-logic",
